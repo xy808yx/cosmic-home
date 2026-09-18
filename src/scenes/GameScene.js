@@ -13,8 +13,6 @@ import {
   getProblemSecondsForWorldAndMode,
   getAdaptiveProblemSeconds,
   getComfortableProblemSeconds,
-  isRoundMastered,
-  calculateStars,
   getAsteroidCountForWorld,
   getBossHpForWorld,
   getBossDurationForWorld,
@@ -43,6 +41,7 @@ import { darken, lighten } from '../colorUtils.js';
 import { COLORS } from '../colorPalette.js';
 import { createTopBar, drawTimeBar } from '../GameTopBar.js';
 import { showArcadeResults } from '../ArcadeRun.js';
+import { calculateRoundResult } from '../RoundResults.js';
 
 const W = 1080;
 const H = 1920;
@@ -159,6 +158,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.score = 0;
+    this.correctAnswers = 0;
     this.attempts = 0;
     this.streak = 0;
     this.bestStreak = 0;
@@ -925,7 +925,7 @@ export class GameScene extends Phaser.Scene {
   // remaining asteroids during that window — the just-answered one is already
   // in phase 'resolving' (not answerable), which prevents double-credit.
   _inputUnlocked() {
-    return this.state === 'playing' || this.state === 'feedback';
+    return !this._pauseOpen && (this.state === 'playing' || this.state === 'feedback');
   }
 
   // True when MC buttons should respond. Distinct from _inputUnlocked: even
@@ -993,6 +993,7 @@ export class GameScene extends Phaser.Scene {
     records.recordAnswer(asteroid.problem, true, elapsed);
 
     this.score++;
+    this.correctAnswers++;
     this.streak++;
     this.bestStreak = Math.max(this.bestStreak, this.streak);
     this.scoreText.setText(this.score.toString());
@@ -1024,6 +1025,9 @@ export class GameScene extends Phaser.Scene {
 
     if (asteroid.isBoss) {
       this.bossHp = Math.max(0, this.bossHp - 1);
+      // Commit the win on the final answer. The impact animation must not let
+      // the countdown turn an already defeated boss into a timeout.
+      if (this.bossHp === 0) this.bossDefeated = true;
       this.drawBossHp();
       // Big-fight panic: speed the boss theme up once for the final third of HP.
       // Reserved for the grand finale (Patient Zero, W28) and the King Coli
@@ -1241,9 +1245,8 @@ export class GameScene extends Phaser.Scene {
     this.setHp(this.shipHp - 1);
 
     if (asteroid.isBoss) {
-      // Boss impact doesn't remove the boss — it stays answerable for the
-      // counter-attack + correction beat, so put it back to 'falling'.
-      asteroid.phase = 'falling';
+      // Keep this expired problem closed through the counter-attack and
+      // correction. cycleBossProblem opens input for the next problem.
       if (this.shipHp <= 0) {
         this.failLevel();
         return;
@@ -2091,7 +2094,7 @@ export class GameScene extends Phaser.Scene {
 
     // Arcade modes have no round timer — Boss Rush ends on boss defeat / ship
     // death, Endless runs until the ship is lost. The time bar stays static.
-    if (!this.arcadeMode) {
+    if (!this.arcadeMode && !this.bossDefeated) {
       this.timeLeft -= delta;
       if (this.timeLeft <= 0) {
         this.timeLeft = 0;
@@ -2272,7 +2275,7 @@ export class GameScene extends Phaser.Scene {
     const st = this.arcadeState || {
       queue: [this.worldId], index: 0, correct: 0, attempts: 0, startMs: Date.now()
     };
-    st.correct += this.score;
+    st.correct += this.correctAnswers;
     st.attempts += this.attempts;
     st.shipHp = this.shipHp;
     st.index += 1;
@@ -2314,10 +2317,10 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.shake(500, 0.02);
 
     const st = this.arcadeState;
-    let correct = this.score;
+    let correct = this.correctAnswers;
     let attempts = this.attempts;
     if (this.arcadeMode === 'bossRush' && st) {
-      correct = st.correct + this.score;
+      correct = st.correct + this.correctAnswers;
       attempts = st.attempts + this.attempts;
     }
     const timeMs = st?.startMs ? Date.now() - st.startMs : 0;
@@ -2325,12 +2328,15 @@ export class GameScene extends Phaser.Scene {
     this.time.delayedCall(600, () => {
       showArcadeResults(this, {
         mode: this.arcadeMode, won: false,
-        correct, attempts, timeMs, score: this.score
+        correct, attempts, timeMs,
+        score: this.reviewMode ? this.correctAnswers : this.score
       });
     });
   }
 
-  endRound({ bossWin, bossAsteroid } = {}) {
+  endRound({ bossWin = false, bossAsteroid } = {}) {
+    if (this._isOver()) return;
+    bossWin = this.isBoss && (bossWin || this.bossDefeated);
     if (this.arcadeMode) { this._arcadeRoundEnd({ bossWin, bossAsteroid }); return; }
     this.setState('ended');
     audio.playRoundComplete?.();
@@ -2339,17 +2345,18 @@ export class GameScene extends Phaser.Scene {
       if (a.fallTween) a.fallTween.stop();
     });
 
-    const accuracy = this.attempts > 0 ? Math.round((this.score / this.attempts) * 100) : 0;
-    const stars = bossWin ? this.calculateBossStars() : this.calculateStars(this.score, accuracy);
+    const { accuracy, stars, mastered } = calculateRoundResult({
+      score: this.score,
+      correctAnswers: this.correctAnswers,
+      attempts: this.attempts,
+      scoreThreshold: this.scoreThreshold,
+      isBoss: this.isBoss,
+      bossWin,
+      bossStars: bossWin ? this.calculateBossStars() : 0
+    });
 
     const prevBestStars = progress.worldProgress[this.worldId]?.levelStars?.[this.currentLevel] || 0;
     const firstMastery = stars === 3 && prevBestStars < 3;
-
-    // Mastery gate: only a solid round advances the campaign (see isRoundMastered).
-    // A boss WIN always counts; practice levels need high accuracy + real volume.
-    const mastered = isRoundMastered({
-      isBoss: this.isBoss, bossWin, score: this.score, accuracy, scoreThreshold: this.scoreThreshold
-    });
 
     // Capture pre-completion mastery so we can tell when THIS run was the one
     // that completed the world (all 4 mastered) and thus unlocked the next.
@@ -2492,10 +2499,6 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  calculateStars(score, accuracy) {
-    return calculateStars(score, accuracy, this.scoreThreshold);
-  }
-
   calculateBossStars() {
     const lost = SHIP_HP_MAX - this.shipHp;
     // The Glitch boss (Datamosh) is a 22-hit gauntlet of visually corrupted
@@ -2563,7 +2566,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     const statY = starY + 220;
-    panel.add(this.add.text(-220, statY, this.score.toString(), style('display', {
+    panel.add(this.add.text(-220, statY, this.correctAnswers.toString(), style('display', {
       fontSize: '78px',
       fill: '#ffffff'
     })).setOrigin(0.5));

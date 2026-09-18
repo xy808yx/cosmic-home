@@ -251,7 +251,7 @@ export class ShopScene extends Phaser.Scene {
     audio.playClick();
     this.activeTab = tabId;
     this.refreshTabBar();
-    this.renderActiveTab();
+    this.renderActiveTab({ resetScroll: true });
   }
 
   installScrollControls() {
@@ -270,7 +270,7 @@ export class ShopScene extends Phaser.Scene {
     const DRAG_THRESHOLD = 6;
 
     this.input.on('pointerdown', (p) => {
-      if (p.y < this.scrollTop || p.y > this.scrollBottom) {
+      if (!this.isPointerInScrollViewport(p)) {
         dragging = false;
         return;
       }
@@ -304,10 +304,15 @@ export class ShopScene extends Phaser.Scene {
     this.scrollLayer.y = -this.scrollOffset;
   }
 
+  isPointerInScrollViewport(pointer) {
+    return pointer.x >= 0 && pointer.x <= W
+      && pointer.y >= this.scrollTop && pointer.y <= this.scrollBottom;
+  }
+
   // ============================================================
   // GRID RENDERING
   // ============================================================
-  renderActiveTab() {
+  renderActiveTab({ resetScroll = false } = {}) {
     // Wipe existing cards
     this.cardObjects.forEach(o => o.destroy());
     this.cardObjects = [];
@@ -320,7 +325,7 @@ export class ShopScene extends Phaser.Scene {
     const gapX = 18;
     const gapY = 22;
     const startX = W / 2 - (cols * cardW + (cols - 1) * gapX) / 2 + cardW / 2;
-    // Place first row's TOP just inside the scroll viewport (scrollTop=320).
+    // Place the first row just inside the scroll viewport.
     const startY = this.scrollTop + cardH / 2 + 20;
 
     items.forEach((item, i) => {
@@ -340,8 +345,8 @@ export class ShopScene extends Phaser.Scene {
     const contentHeight = rows * (cardH + gapY) - gapY;
     const contentBottom = startY - cardH / 2 + contentHeight;
     this.scrollMaxOffset = Math.max(0, contentBottom - this.scrollBottom + 40);
-    this.scrollOffset = 0;
-    this.scrollLayer.y = 0;
+    this.scrollOffset = resetScroll ? 0 : this.scrollOffset;
+    this.applyScroll(0);
   }
 
   itemsForTab(tabId) {
@@ -509,17 +514,24 @@ export class ShopScene extends Phaser.Scene {
     // gate, a phantom pointerup landing on a freshly-rendered card after a
     // purchase rebuild would trigger another handleTap. The scene-wide drag
     // tracker still suppresses taps that turn into a swipe.
-    let pressed = false;
-    hit.on('pointerdown', () => { pressed = true; });
-    hit.on('pointerup', () => {
-      const wasPressed = pressed;
-      pressed = false;
-      if (this.dragMoved || !wasPressed) return;
+    // Geometry masks clip the artwork, so input also checks the visible area.
+    let pressedPointer = null;
+    hit.on('pointerdown', pointer => {
+      pressedPointer = this.isPointerInScrollViewport(pointer) ? pointer.id : null;
+    });
+    hit.on('pointerup', pointer => {
+      const wasPressed = pressedPointer !== null && pressedPointer === pointer.id;
+      pressedPointer = null;
+      if (this.dragMoved || !wasPressed || !this.isPointerInScrollViewport(pointer)) return;
       this.handleTap(item, tabId, owned, equipped, canAfford);
     });
-    hit.on('pointerover', () => this.tweens.add({ targets: c, scale: 1.03, duration: 100 }));
+    hit.on('pointerover', pointer => {
+      if (this.isPointerInScrollViewport(pointer)) {
+        this.tweens.add({ targets: c, scale: 1.03, duration: 100 });
+      }
+    });
     hit.on('pointerout', () => {
-      pressed = false;
+      pressedPointer = null;
       this.tweens.add({ targets: c, scale: 1, duration: 100 });
     });
 

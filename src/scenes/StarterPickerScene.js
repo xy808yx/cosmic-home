@@ -5,7 +5,7 @@ import { SPECIES, companion, drawCompanion } from '../CompanionManager.js';
 import { TransitionManager } from '../TransitionManager.js';
 import { createStarfield } from '../starfieldHelper.js';
 import { createButton } from '../buttonHelper.js';
-import { style } from '../textStyles.js';
+import { style, menuStyle } from '../textStyles.js';
 import { COLORS } from '../colorPalette.js';
 
 const W = 1080;
@@ -25,25 +25,22 @@ export class StarterPickerScene extends Phaser.Scene {
       fontSize: '72px'
     })).setOrigin(0.5).setDepth(10);
 
-    this.add.text(W / 2, 270, 'Three cosmic eggs await. Choose one to hatch.', style('body', {
-      fontSize: '32px',
-      fill: '#cfcfe0'
+    this.add.text(W / 2, 270, 'Three cosmic eggs await. Choose one to hatch.', menuStyle('body', {
+      align: 'center',
+      wordWrap: { width: 940 }
     })).setOrigin(0.5).setDepth(10);
 
     this.selectedId = null;
     this.cards = {};
 
     const ids = ['ember', 'tide', 'sprout'];
-    const cardW = 300;
-    const cardH = 980;
-    const gap = 40;
-    const totalW = cardW * 3 + gap * 2;
-    const startX = W / 2 - totalW / 2 + cardW / 2;
+    const cardW = 960;
+    const cardH = 430;
+    const gap = 15;
 
     ids.forEach((id, i) => {
-      const cx = startX + i * (cardW + gap);
-      const cy = 980;
-      this.cards[id] = this.createCard(id, cx, cy, cardW, cardH);
+      const cy = 580 + i * (cardH + gap);
+      this.cards[id] = this.createCard(id, W / 2, cy, cardW, cardH);
     });
 
     this.confirmBtn = createButton(this, {
@@ -51,8 +48,10 @@ export class StarterPickerScene extends Phaser.Scene {
       y: 1780,
       label: 'Hatch your egg',
       width: 480,
-      height: 110,
+      height: 130,
       color: 0x4a4a6a,
+      textOverrides: menuStyle('button'),
+      enabled: false,
       onClick: () => this.confirm()
     });
     this.confirmBtn.setDepth(20);
@@ -81,37 +80,33 @@ export class StarterPickerScene extends Phaser.Scene {
     card.ch = ch;
     card.color = sp.color;
 
-    const pet = drawCompanion(this, 0, -ch / 2 + 220, {
+    const pet = drawCompanion(this, -345, 20, {
       speciesId: id,
       stage: 'egg',
       preview: true,
-      scale: 1.5
+      scale: 1.4
     });
     card.add(pet);
 
-    card.add(this.add.text(0, -ch / 2 + 420, sp.name, style('display', {
+    const textX = -200;
+    const textWidth = 640;
+    card.add(this.add.text(textX, -175, sp.name, style('display', {
       fontSize: '52px',
       fill: '#' + sp.color.toString(16).padStart(6, '0')
-    })).setOrigin(0.5));
+    })).setOrigin(0, 0));
 
-    card.add(this.add.text(0, -ch / 2 + 490, sp.tagline, style('caption', {
-      fontSize: '22px',
-      fill: '#cfcfe0',
-      align: 'center',
-      wordWrap: { width: cw - 40 }
-    })).setOrigin(0.5));
+    card.add(this.add.text(textX, -105, sp.tagline, menuStyle('caption', {
+      wordWrap: { width: textWidth }
+    })).setOrigin(0, 0));
 
     const lore = sp.stages.egg.lore;
-    card.add(this.add.text(0, -ch / 2 + 640, lore, style('body', {
-      fontSize: '22px',
-      fill: '#a8a8c0',
-      align: 'center',
-      wordWrap: { width: cw - 50 }
-    })).setOrigin(0.5));
+    card.add(this.add.text(textX, 0, lore, menuStyle('body', {
+      wordWrap: { width: textWidth }
+    })).setOrigin(0, 0));
 
     const hit = this.add.rectangle(0, 0, cw, ch, 0x000000, 0).setInteractive({ useHandCursor: true });
     card.add(hit);
-    hit.on('pointerover', () => this.tweens.add({ targets: card, scaleX: 1.04, scaleY: 1.04, duration: 120 }));
+    hit.on('pointerover', () => this.tweens.add({ targets: card, scaleX: 1.015, scaleY: 1.015, duration: 120 }));
     hit.on('pointerout', () => {
       if (this.selectedId !== id) {
         this.tweens.add({ targets: card, scaleX: 1, scaleY: 1, duration: 120 });
@@ -135,8 +130,8 @@ export class StarterPickerScene extends Phaser.Scene {
       card.bg.strokeRoundedRect(-card.cw / 2, -card.ch / 2, card.cw, card.ch, 22);
       this.tweens.add({
         targets: card,
-        scaleX: isSelected ? 1.06 : 1,
-        scaleY: isSelected ? 1.06 : 1,
+        scaleX: isSelected ? 1.02 : 1,
+        scaleY: isSelected ? 1.02 : 1,
         duration: 160,
         ease: 'Back.easeOut'
       });
@@ -148,8 +143,9 @@ export class StarterPickerScene extends Phaser.Scene {
       y: 1780,
       label: `Pick ${SPECIES[id].name}`,
       width: 480,
-      height: 110,
+      height: 130,
       color: SPECIES[id].color,
+      textOverrides: menuStyle('button'),
       onClick: () => this.confirm()
     });
     this.confirmBtn.setDepth(20);

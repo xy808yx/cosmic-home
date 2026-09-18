@@ -634,44 +634,10 @@ export function usesConveyorScene(world, levelMode) {
   return true;
 }
 
-// ── Mastery gate ─────────────────────────────────────────────────────────────
-// A level only ADVANCES the campaign (unlocks the next world) when it's truly
-// "mastered", not merely touched. Before this gate, any single correct answer
-// (≥1 star) cleared a level and the next world unlocked on a raw count — so a
-// capable kid could blast through a world in minutes. Mastery means a SOLID
-// round: high accuracy AND a real volume of correct answers (a lucky tap or a
-// fast-but-sloppy spray no longer counts). Bosses: beating the boss IS the
-// demonstration (it's already ~12+ correct, 100% weak facts). Stars still record
-// the kid's best result for display/reward; mastery is a separate, additive flag
-// (worldProgress[w].levelMastered) so this can never RE-LOCK already-earned
-// progress — `unlocked` is sticky (checkWorldUnlock only ever flips → true).
-// Two dials, one place: raise MASTERY_ACCURACY for stricter, lower the ratio to
-// require fewer correct answers. The ratio must stay low enough that the volume
-// floor is reachable in a single 60s round at a YOUNGER kid's answering pace —
-// at 0.5 the floors are 9 (mult) / 7 (div) / 8 (mixed) correct, hittable in ~60s
-// even when a slow kid answers every ~5-6s. Accuracy (80%) carries the rigor.
-export const MASTERY_ACCURACY = 80;     // percent correct on a practice level
-export const MASTERY_SCORE_RATIO = 0.5; // × the 3-star scoreThreshold = min correct
-export function isRoundMastered({ isBoss, bossWin, score, accuracy, scoreThreshold }) {
-  if (isBoss) return !!bossWin;
-  return accuracy >= MASTERY_ACCURACY &&
-         score >= Math.ceil(scoreThreshold * MASTERY_SCORE_RATIO);
-}
-
-// Cosmetic star rating for a finished practice round. Distinct from the mastery
-// GATE above (which advances the campaign): stars are only the best-result
-// record + reward tier shown on the summary. 3 stars wants both the full
-// 3-star volume AND high accuracy; 2 stars is "most of the volume OR accurate".
-// Shared by GameScene (falling asteroids) and ConveyorScene (Pack & Go) so
-// both modes score a round identically. NOTE the 85% accuracy here is the
-// 3-STAR bar, separate from MASTERY_ACCURACY (80%).
-export function calculateStars(score, accuracy, scoreThreshold) {
-  if (score === 0) return 0;
-  const meetsAccuracy = accuracy >= 85;
-  if (score >= scoreThreshold && meetsAccuracy) return 3;
-  if (score >= Math.ceil(scoreThreshold * 0.7) || meetsAccuracy) return 2;
-  return 1;
-}
+// Preserve the existing imports while both scene engines share pure result rules.
+export {
+  MASTERY_ACCURACY, MASTERY_SCORE_RATIO, isRoundMastered, calculateStars
+} from './RoundResults.js';
 
 // Per-problem timer (seconds) keyed by world id. Drives asteroid descent speed
 // and spawn cadence.

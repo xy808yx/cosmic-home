@@ -1,9 +1,11 @@
 {
   "name": "cosmic-math-crunch",
   "version": "1.0.0",
+  "type": "module",
   "description": "A multiplication-learning match-3 game",
   "scripts": {
     "start": "vite",
+    "test": "node --test tests/*.mjs",
     "build": "vite build",
     "preview": "vite preview"
   },

@@ -21,6 +21,7 @@ import Phaser from 'phaser';
 import { progress, getChapterWorlds } from '../GameData.js';
 import { audio } from '../AudioManager.js';
 import { music } from '../MusicManager.js';
+import { MUSIC_ASSETS } from '../MusicAssets.js';
 import { TransitionManager } from '../TransitionManager.js';
 import { createStarfield } from '../starfieldHelper.js';
 import { style } from '../textStyles.js';
@@ -115,6 +116,12 @@ function drawGondolaCabin(g) {
 export class CreditsScene extends Phaser.Scene {
   constructor() {
     super({ key: 'CreditsScene' });
+  }
+
+  preload() {
+    if (!this.cache.audio.exists('creditsSong')) {
+      this.load.audio('creditsSong', MUSIC_ASSETS.creditsSong);
+    }
   }
 
   create() {

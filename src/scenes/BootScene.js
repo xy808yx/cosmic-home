@@ -4,6 +4,7 @@ import { companion } from '../CompanionManager.js';
 import { createStarfield } from '../starfieldHelper.js';
 import { audio } from '../AudioManager.js';
 import { music } from '../MusicManager.js';
+import { MUSIC_ASSETS } from '../MusicAssets.js';
 import { TransitionManager } from '../TransitionManager.js';
 import { drawShip } from '../ShipRenderer.js';
 import { progress } from '../GameData.js';
@@ -19,33 +20,10 @@ export class BootScene extends Phaser.Scene {
   }
 
   preload() {
-    this.load.audio('homeTheme',   'audio/home-theme.mp3');
-    this.load.audio('creditsSong', 'audio/credits.mp3');
-    // Optional themes load normally; a missing file fails softly via 'loaderror'
-    // (MusicManager.ensurePlaying no-ops on absent audio) instead of blocking the
-    // main thread with synchronous HEAD probes before first paint.
-    this.load.audio('levelTheme', 'audio/levels.mp3');
-    this.load.audio('bossTheme',  'audio/boss-fight.mp3');
-    this.load.audio('dadsGarage', 'audio/dads-garage.mp3');
-    // Chapter 2 "Inner Space" bespoke soundtrack. Until these MP3s exist they
-    // fail softly (loaderror below) and MusicManager.resolveTrack falls back to
-    // the Chapter 1 themes, so Inner Space is never silent.
-    this.load.audio('innerSpaceHome',  'audio/inner-space-home.mp3');
-    this.load.audio('innerSpaceLevel', 'audio/inner-space-level.mp3');
-    this.load.audio('innerSpaceBoss',  'audio/inner-space-boss.mp3');
-    this.load.audio('playgroundTheme', 'audio/playground.mp3');
-    // Chapter 3 "Home Ground" bespoke soundtrack, same fail-soft pattern: until
-    // these MP3s exist, MusicManager.resolveTrack falls back to the Chapter 1
-    // home/level/boss themes, so Home Ground is never silent. The three briefs
-    // live in public/audio/README.md; drop the files in and nothing else changes.
-    this.load.audio('homeGroundHome',  'audio/home-ground-home.mp3');
-    this.load.audio('homeGroundLevel', 'audio/home-ground-level.mp3');
-    this.load.audio('homeGroundBoss',  'audio/home-ground-boss.mp3');
-    // Chapter 3 secret room ("Hot Pot Time", W19). Falls back to the garage
-    // track — warm and intimate, and already shipped — rather than homeTheme.
-    this.load.audio('hotPotTheme', 'audio/hot-pot.mp3');
+    // Only the intro's song blocks boot. Other themes load when first requested.
+    this.load.audio('homeTheme', MUSIC_ASSETS.homeTheme);
     this.load.on('loaderror', (file) => {
-      console.info(`[boot] optional audio "${file?.key}" unavailable, skipped`);
+      console.info(`[boot] audio "${file?.key}" unavailable, skipped`);
     });
 
     // Only visible if preload runs long; create() destroys it on entry.

@@ -40,3 +40,17 @@ const PRESETS = {
 export function style(name, overrides = {}) {
   return { ...PRESETS[name], ...overrides };
 }
+
+// Menu copy is drawn on a 1080px canvas. At the minimum 360px phone width,
+// these sizes keep body text at 14px and supporting text above 13px.
+const MENU_PRESETS = {
+  body: { fontSize: '42px', fill: '#e0e0ef' },
+  caption: { fontSize: '40px', fill: '#cfcfe0' },
+  button: { fontSize: '44px', fontStyle: '800' }
+};
+
+export function menuStyle(name, overrides = {}) {
+  return style(name === 'button' ? 'subhead' : name, {
+    ...MENU_PRESETS[name], ...overrides
+  });
+}

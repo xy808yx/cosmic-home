@@ -8,7 +8,7 @@ import { music } from '../MusicManager.js';
 import { TransitionManager } from '../TransitionManager.js';
 import { createStarfield } from '../starfieldHelper.js';
 import { createIconButton, createButton } from '../buttonHelper.js';
-import { style } from '../textStyles.js';
+import { style, menuStyle } from '../textStyles.js';
 import { drawArrowLeftIcon } from '../StatIcons.js';
 import { COLORS } from '../colorPalette.js';
 
@@ -35,7 +35,6 @@ export class SettingsScene extends Phaser.Scene {
       accentColor: COLORS.accentTeal,
       drawIcon: (g, size) => drawArrowLeftIcon(g, 0, 0, size),
       onClick: () => {
-        audio.playClick();
         new TransitionManager(this).fadeToScene('WorldMapScene');
       }
     }).setDepth(15);
@@ -56,8 +55,7 @@ export class SettingsScene extends Phaser.Scene {
     card.lineStyle(3, 0xb6e0ff, 0.7);
     card.strokeRoundedRect(cardX - cardW / 2, cardY - cardH / 2, cardW, cardH, 24);
 
-    this.add.text(cardX, cardY - cardH / 2 + 60, 'AUDIO', style('subhead', {
-      fontSize: '32px',
+    this.add.text(cardX, cardY - cardH / 2 + 60, 'AUDIO', menuStyle('button', {
       fill: '#ffffff',
       fontStyle: '900'
     })).setOrigin(0.5).setDepth(12);
@@ -67,9 +65,7 @@ export class SettingsScene extends Phaser.Scene {
     this.renderToggles(cardX, cardY);
 
     // Hint about per-game pause menu — kids should know that's there too.
-    this.add.text(W / 2, cardY + cardH / 2 + 60, 'You can also toggle these from the pause button during a level.', style('caption', {
-      fontSize: '20px',
-      fill: '#9a9aae',
+    this.add.text(W / 2, cardY + cardH / 2 + 100, 'You can also toggle these from the pause button during a level.', menuStyle('caption', {
       align: 'center',
       wordWrap: { width: 800 }
     })).setOrigin(0.5).setDepth(11);
@@ -78,33 +74,25 @@ export class SettingsScene extends Phaser.Scene {
   }
 
   renderToggles(cardX, cardY) {
-    if (this.soundBtn) this.soundBtn.destroy();
-    if (this.musicBtn) this.musicBtn.destroy();
-
-    this.soundBtn = createButton(this, {
-      x: cardX, y: cardY - 40,
-      width: 540, height: 110,
-      label: `Sound: ${audio.enabled ? 'ON' : 'OFF'}`,
-      color: audio.enabled ? 0xb6e0ff : 0x4a4a5a,
-      textOverrides: { fontSize: '34px', fill: '#0a0a1a', fontStyle: '900' },
-      onClick: () => {
-        audio.setEnabled?.(!audio.enabled);
-        this.renderToggles(cardX, cardY);
-      }
+    const toggles = [
+      { key: 'soundBtn', label: 'Sound', manager: audio, y: cardY - 40, color: 0xb6e0ff },
+      { key: 'musicBtn', label: 'Music', manager: music, y: cardY + 100, color: 0xc77eff }
+    ];
+    toggles.forEach(({ key, label, manager, y, color }) => {
+      this[key]?.destroy();
+      this[key] = createButton(this, {
+        x: cardX, y,
+        width: 540, height: 130,
+        label: `${label}: ${manager.enabled ? 'ON' : 'OFF'}`,
+        color: manager.enabled ? color : 0x4a4a5a,
+        textOverrides: menuStyle('button', {
+          fill: manager.enabled ? '#0a0a1a' : '#ffffff', fontStyle: '900'
+        }),
+        onClick: () => {
+          manager.setEnabled(!manager.enabled);
+          this.renderToggles(cardX, cardY);
+        }
+      }).setDepth(13);
     });
-    this.soundBtn.setDepth(13);
-
-    this.musicBtn = createButton(this, {
-      x: cardX, y: cardY + 100,
-      width: 540, height: 110,
-      label: `Music: ${music.enabled ? 'ON' : 'OFF'}`,
-      color: music.enabled ? 0xc77eff : 0x4a4a5a,
-      textOverrides: { fontSize: '34px', fill: '#0a0a1a', fontStyle: '900' },
-      onClick: () => {
-        music.setEnabled?.(!music.enabled);
-        this.renderToggles(cardX, cardY);
-      }
-    });
-    this.musicBtn.setDepth(13);
   }
 }

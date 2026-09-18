@@ -22,8 +22,8 @@
 //     to GameScene's protocol), and the crate stays so the kid can retry.
 //   • A crate that rides off the end requeues that exact fact (no record — a
 //     non-answer isn't a wrong answer) so the kid sees it again next.
-//   • Round-end re-implements GameScene's CAMPAIGN branch from the shared
-//     primitives: calculateStars / isRoundMastered / completeLevel / addStardust.
+//   • Round-end shares GameScene's result rules, then records campaign progress
+//     and rewards through completeLevel / addStardust.
 //
 // PHASE 2 (the pedagogy win): two interchangeable input modes behind the
 // `conveyorInputMode` localStorage flag — the engine can't tell them apart
@@ -75,8 +75,6 @@ import {
   getBossHpForWorld,
   getBossDurationForWorld,
   getConveyorSecretForHost,
-  isRoundMastered,
-  calculateStars,
   getWorldMusicRate,
   isChapter3FinaleWorld,
   progress
@@ -93,6 +91,7 @@ import { companion, drawCompanion } from '../CompanionManager.js';
 import { cosmetics } from '../CosmeticManager.js';
 import { economy, claimDailyBonusIfDue } from '../EconomyManager.js';
 import { records } from '../RecordsManager.js';
+import { calculateRoundResult, getRoundAccuracy } from '../RoundResults.js';
 import { drawStarIcon, drawSparkleIcon } from '../StatIcons.js';
 import { drawMasteryWall } from '../MasteryWall.js';
 
@@ -1878,7 +1877,7 @@ export class ConveyorScene extends Phaser.Scene {
     if (this.keypad) this.setKeypadEnabled(false);
     audio.playRoundComplete?.();
 
-    const accuracy = this.attempts > 0 ? Math.round((this.score / this.attempts) * 100) : 0;
+    const accuracy = getRoundAccuracy(this.score, this.attempts);
     const remaining = this.roundEndsAt ? Math.max(0, this.roundEndsAt - this.time.now) : 0;
     const timeLeftRatio = this.duration > 0 ? remaining / (this.duration * 1000) : 0;
 
@@ -1888,17 +1887,16 @@ export class ConveyorScene extends Phaser.Scene {
     // score as a win. bossWon is the source of truth.
     const isWin = bossWin || (this.isBoss && this.bossWon);
 
-    // Boss = quota race: a WIN is the mastery demonstration (isRoundMastered),
-    // stars reward how cleanly + quickly the order was filled. Practice = the
-    // accuracy + volume gate, same primitive GameScene uses.
-    let stars, mastered;
-    if (this.isBoss) {
-      stars = isWin ? this.calculateConveyorBossStars(accuracy, timeLeftRatio) : 0;
-      mastered = isRoundMastered({ isBoss: true, bossWin: isWin, score: this.score, accuracy, scoreThreshold: this.scoreThreshold });
-    } else {
-      stars = calculateStars(this.score, accuracy, this.scoreThreshold);
-      mastered = isRoundMastered({ isBoss: false, bossWin: false, score: this.score, accuracy, scoreThreshold: this.scoreThreshold });
-    }
+    // Belt score counts correct crates, so it has no separate bonus points.
+    const { stars, mastered } = calculateRoundResult({
+      score: this.score,
+      correctAnswers: this.score,
+      attempts: this.attempts,
+      scoreThreshold: this.scoreThreshold,
+      isBoss: this.isBoss,
+      bossWin: isWin,
+      bossStars: isWin ? this.calculateConveyorBossStars(accuracy, timeLeftRatio) : 0
+    });
 
     const prevBestStars = progress.worldProgress[this.worldId]?.levelStars?.[this.currentLevel] || 0;
     const firstMastery = stars === 3 && prevBestStars < 3;

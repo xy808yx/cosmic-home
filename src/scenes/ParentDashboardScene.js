@@ -7,11 +7,12 @@ import { records } from '../RecordsManager.js';
 import { audio } from '../AudioManager.js';
 import { music } from '../MusicManager.js';
 import { companion, drawCompanion } from '../CompanionManager.js';
-import { style } from '../textStyles.js';
+import { style, menuStyle } from '../textStyles.js';
 import { createIconButton, createButton } from '../buttonHelper.js';
 import { createStarfield } from '../starfieldHelper.js';
 import { drawArrowLeftIcon, drawSoundIcon } from '../StatIcons.js';
 import { COLORS } from '../colorPalette.js';
+import { createPinKeypad } from '../pinKeypad.js';
 
 const W = 1080;
 const H = 1920;
@@ -48,10 +49,8 @@ export class ParentDashboardScene extends Phaser.Scene {
       fill: '#ffffff'
     })).setOrigin(0.5).setDepth(10);
 
-    this.add.text(W / 2, 320, 'Enter PIN to continue', style('body', {
-      fontSize: '28px',
-      fill: '#cfcfe0'
-    })).setOrigin(0.5).setDepth(10);
+    this.add.text(W / 2, 320, 'Enter PIN to continue', menuStyle('body'))
+      .setOrigin(0.5).setDepth(10);
 
     this.pinDigits = ['', '', '', ''];
     this.currentPinIndex = 0;
@@ -71,56 +70,12 @@ export class ParentDashboardScene extends Phaser.Scene {
   }
 
   createNumberPad() {
-    const buttonSize = 140;
-    const spacing = 168;
-    const startX = W / 2 - spacing;
-    const startY = 700;
-
-    for (let i = 0; i < 9; i++) {
-      const row = Math.floor(i / 3);
-      const col = i % 3;
-      const x = startX + col * spacing;
-      const y = startY + row * spacing;
-      const num = i + 1;
-      this.makePadButton(x, y, buttonSize, num.toString(), () => this.enterDigit(num.toString()));
-    }
-    this.makePadButton(startX + spacing, startY + 3 * spacing, buttonSize, '0', () => this.enterDigit('0'));
-    this.makePadButton(startX, startY + 3 * spacing, buttonSize, 'C', () => this.clearPin(), WARN);
-    this.makePadButton(startX + 2 * spacing, startY + 3 * spacing, buttonSize, '<', () => this.backspace(), 0xffb142);
-  }
-
-  makePadButton(x, y, size, label, callback, color = ACCENT) {
-    const c = this.add.container(x, y).setDepth(10);
-    const bg = this.add.graphics();
-    bg.fillStyle(COLORS.bgPanel, 0.95);
-    bg.fillRoundedRect(-size / 2, -size / 2, size, size, 16);
-    bg.lineStyle(3, color, 0.8);
-    bg.strokeRoundedRect(-size / 2, -size / 2, size, size, 16);
-    c.add(bg);
-    c.add(this.add.text(0, 0, label, style('display', {
-      fontSize: '52px',
-      fill: '#ffffff'
-    })).setOrigin(0.5));
-    const hit = this.add.rectangle(0, 0, size, size, 0x000000, 0).setInteractive({ useHandCursor: true });
-    c.add(hit);
-    hit.on('pointerdown', () => {
-      audio.playClick();
-      callback();
-    });
-    hit.on('pointerover', () => {
-      bg.clear();
-      bg.fillStyle(0x1a1a30, 0.95);
-      bg.fillRoundedRect(-size / 2, -size / 2, size, size, 16);
-      bg.lineStyle(4, color, 1);
-      bg.strokeRoundedRect(-size / 2, -size / 2, size, size, 16);
-    });
-    hit.on('pointerout', () => {
-      bg.clear();
-      bg.fillStyle(COLORS.bgPanel, 0.95);
-      bg.fillRoundedRect(-size / 2, -size / 2, size, size, 16);
-      bg.lineStyle(3, color, 0.8);
-      bg.strokeRoundedRect(-size / 2, -size / 2, size, size, 16);
-    });
+    createPinKeypad(this, {
+      x: W / 2, y: 700,
+      onDigit: digit => this.enterDigit(digit),
+      onClear: () => this.clearPin(),
+      onBackspace: () => this.backspace(),
+    }).setDepth(10);
   }
 
   enterDigit(digit) {
@@ -646,62 +601,63 @@ export class ParentDashboardScene extends Phaser.Scene {
     const overlay = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.85).setDepth(50).setInteractive();
     const c = this.add.container(W / 2, H / 2).setDepth(51);
     const w = 720;
-    const h = 600;
+    const h = 1240;
     const bg = this.add.graphics();
     bg.fillStyle(COLORS.bgPanel, 0.98);
     bg.fillRoundedRect(-w / 2, -h / 2, w, h, 22);
     bg.lineStyle(3, ACCENT, 0.9);
     bg.strokeRoundedRect(-w / 2, -h / 2, w, h, 22);
     c.add(bg);
-    c.add(this.add.text(0, -h / 2 + 60, 'Change PIN', style('display', {
-      fontSize: '44px',
+    c.add(this.add.text(0, -h / 2 + 85, 'Change PIN', style('display', {
+      fontSize: '48px',
       fill: '#ffd86b'
     })).setOrigin(0.5));
-    c.add(this.add.text(0, -h / 2 + 130, 'Enter new 4-digit PIN', style('body', {
-      fontSize: '24px',
-      fill: '#cfcfe0'
-    })).setOrigin(0.5));
+    c.add(this.add.text(0, -h / 2 + 155, 'Enter new 4-digit PIN', menuStyle('body'))
+      .setOrigin(0.5));
 
     const newPin = ['', '', '', ''];
     let idx = 0;
-    const pinDisplay = this.add.text(0, -h / 2 + 230, '_ _ _ _', style('display', {
-      fontSize: '64px',
+    const pinDisplay = this.add.text(0, -h / 2 + 270, '_ _ _ _', style('display', {
+      fontSize: '80px',
       fill: '#ffffff'
     })).setOrigin(0.5);
     c.add(pinDisplay);
 
-    const onKey = e => {
-      if (e.key >= '0' && e.key <= '9' && idx < 4) {
-        newPin[idx] = e.key;
-        idx++;
-        pinDisplay.setText(newPin.map(d => d || '_').join(' '));
-      } else if (e.key === 'Backspace' && idx > 0) {
-        idx--;
-        newPin[idx] = '';
-        pinDisplay.setText(newPin.map(d => d || '_').join(' '));
-      }
-    };
-    this.input.keyboard.on('keydown', onKey);
-
-    c.add(this.add.text(0, 80, 'Use the keyboard to enter digits', style('caption', {
-      fontSize: '20px',
-      fill: '#7a7a90'
-    })).setOrigin(0.5));
+    const updateDisplay = () => pinDisplay.setText(newPin.map(d => d || '_').join(' '));
+    c.add(createPinKeypad(this, {
+      y: -150,
+      onDigit: digit => {
+        if (idx >= 4) return;
+        newPin[idx++] = digit;
+        updateDisplay();
+      },
+      onClear: () => {
+        newPin.fill('');
+        idx = 0;
+        updateDisplay();
+      },
+      onBackspace: () => {
+        if (idx === 0) return;
+        newPin[--idx] = '';
+        updateDisplay();
+      },
+    }));
 
     const cleanup = () => {
-      this.input.keyboard.off('keydown', onKey);
       overlay.destroy();
       c.destroy();
     };
 
     c.add(createButton(this, {
-      x: -120, y: h / 2 - 80, label: 'Cancel',
-      width: 240, height: 80, color: 0x4a4a6a,
+      x: -150, y: h / 2 - 100, label: 'Cancel',
+      width: 270, height: 100, color: 0x4a4a6a,
+      textOverrides: menuStyle('button'),
       onClick: cleanup
     }));
     c.add(createButton(this, {
-      x: 120, y: h / 2 - 80, label: 'Save',
-      width: 240, height: 80, color: SUCCESS,
+      x: 150, y: h / 2 - 100, label: 'Save',
+      width: 270, height: 100, color: SUCCESS,
+      textOverrides: menuStyle('button'),
       onClick: () => {
         if (idx === 4) {
           localStorage.setItem('cosmicMathParentPin', newPin.join(''));
