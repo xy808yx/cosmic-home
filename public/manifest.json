@@ -1,7 +1,7 @@
 {
-  "name": "Cosmic Math Crunch",
-  "short_name": "Math Crunch",
-  "description": "A fun multiplication learning game for kids",
+  "name": "Cosmic Home: Math Adventure",
+  "short_name": "Cosmic Home",
+  "description": "Explore the stars, grow with your companion, and find your way home in a math adventure.",
   "start_url": ".",
   "scope": ".",
   "display": "standalone",

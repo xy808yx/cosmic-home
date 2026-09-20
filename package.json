@@ -1,8 +1,8 @@
 {
-  "name": "cosmic-math-crunch",
+  "name": "cosmic-home",
   "version": "1.0.0",
   "type": "module",
-  "description": "A multiplication-learning match-3 game",
+  "description": "Cosmic Home: Math Adventure",
   "scripts": {
     "start": "vite",
     "test": "node --test tests/*.mjs",

@@ -176,7 +176,7 @@ export class WorldMapScene extends Phaser.Scene {
     bg.fillStyle(COLORS.bgDark, 0.20);
     bg.fillRect(0, fadeSplit, W, MAP_HEADER_FADE_END - fadeSplit);
 
-    const title = this.add.text(W / 2, 90, 'COSMIC MATH', style('display', {
+    const title = this.add.text(W / 2, 90, 'COSMIC HOME', style('display', {
       fontSize: '54px',
       fill: '#ffffff',
       stroke: '#0a0a1a',

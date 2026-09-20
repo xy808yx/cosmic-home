@@ -1,4 +1,4 @@
-# Cosmic Math Crunch — Polish Spec
+# Cosmic Home: Polish Spec
 
 Captured from interview on 2026-05-06. Three slices of polish, in priority order. Each slice is independently shippable.
 

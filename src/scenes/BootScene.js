@@ -106,13 +106,13 @@ export class BootScene extends Phaser.Scene {
 
     this._timers.push(this.time.delayedCall(900, () => {
       if (this._introDone) return;
-      const logo = this.add.text(W / 2, shipY + 280, 'COSMIC MATH', style('display', {
+      const logo = this.add.text(W / 2, shipY + 280, 'COSMIC HOME', style('display', {
         fontSize: '108px',
         fill: '#ffffff',
         stroke: '#0a0a1a',
         strokeThickness: 6,
       })).setOrigin(0.5);
-      const tagline = this.add.text(W / 2, shipY + 360, 'A space adventure for the cosmic crew', style('caption', {
+      const tagline = this.add.text(W / 2, shipY + 360, 'Math Adventure', style('caption', {
         fontSize: '28px',
         fill: '#a7f3d0',
       })).setOrigin(0.5);
