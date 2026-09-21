@@ -14,6 +14,20 @@
   <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
   <link rel="manifest" href="manifest.json">
   <style>
+    @font-face {
+      font-family: "Cosmic Lilita";
+      src: url('/fonts/LilitaOne-Regular.ttf') format('truetype');
+      font-style: normal;
+      font-weight: 400;
+      font-display: swap;
+    }
+    @font-face {
+      font-family: "Cosmic Fredoka";
+      src: url('/fonts/Fredoka-Variable.ttf') format('truetype');
+      font-style: normal;
+      font-weight: 300 700;
+      font-display: swap;
+    }
     * {
       margin: 0;
       padding: 0;
@@ -67,10 +81,18 @@
       max-height: 100%;
       /* Phaser owns canvas sizing and centering inside the available area. */
     }
+    #boot-loading {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      color: #cfcfe0;
+      font: 20px system-ui, sans-serif;
+    }
   </style>
 </head>
 <body>
-  <div id="game-container"></div>
+  <div id="game-container"><p id="boot-loading" role="status">Loading…</p></div>
   <script type="module" src="/src/main.js"></script>
 </body>
 </html>

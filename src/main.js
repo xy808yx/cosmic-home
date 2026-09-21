@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { loadBrandFonts } from './CosmicBrand.js';
 import { BootScene } from './scenes/BootScene.js';
 import { WorldMapScene } from './scenes/WorldMapScene.js';
 import { LevelSelectScene } from './scenes/LevelSelectScene.js';
@@ -48,6 +49,7 @@ const config = {
   ]
 };
 
-const game = new Phaser.Game(config);
-
-window.game = game;
+loadBrandFonts().finally(() => {
+  document.getElementById('boot-loading')?.remove();
+  window.game = new Phaser.Game(config);
+});

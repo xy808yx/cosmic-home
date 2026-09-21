@@ -15,6 +15,7 @@ import { createStarfield, createInnerSpaceBase, createHomeGroundBase } from '../
 import { playWormholeCinematic } from '../WormholeCinematic.js';
 import { createIconButton, createPetPortraitButton, createButton, createProgressBar } from '../buttonHelper.js';
 import { style } from '../textStyles.js';
+import { createCompactTitle } from '../CosmicBrand.js';
 import { companion, drawCompanion, CAROUSEL_STAGE_ORDER, SPECIES } from '../CompanionManager.js';
 import { economy } from '../EconomyManager.js';
 import { ship } from '../ShipManager.js';
@@ -40,6 +41,16 @@ import { createModal } from '../modalHelper.js';
 
 const W = 1080;
 const H = 1920;
+
+const HEADER_LAYOUT = {
+  leftButtons: [90, 186, 282],
+  rightButtons: [W - 186, W - 90],
+  buttonY: 88,
+  buttonRadius: 38,
+  buttonGlow: 4,
+  titleY: 90,
+  titleGutter: 24
+};
 
 const PORTRAIT_SCALE_BY_STAGE = { egg: 2.4, baby: 2.4, teen: 2.0, adult: 2.0, cosmic: 2.6 };
 
@@ -176,12 +187,13 @@ export class WorldMapScene extends Phaser.Scene {
     bg.fillStyle(COLORS.bgDark, 0.20);
     bg.fillRect(0, fadeSplit, W, MAP_HEADER_FADE_END - fadeSplit);
 
-    const title = this.add.text(W / 2, 90, 'COSMIC HOME', style('display', {
-      fontSize: '54px',
-      fill: '#ffffff',
-      stroke: '#0a0a1a',
-      strokeThickness: 4
-    })).setOrigin(0.5).setDepth(14).setInteractive({ useHandCursor: true });
+    // Center the title in the space between the unequal button groups.
+    const { leftButtons, rightButtons, buttonY, buttonRadius, buttonGlow, titleY, titleGutter } = HEADER_LAYOUT;
+    const titleLeft = Math.max(...leftButtons) + buttonRadius + buttonGlow;
+    const titleRight = Math.min(...rightButtons) - buttonRadius - buttonGlow;
+    const titleMaxWidth = titleRight - titleLeft - titleGutter * 2;
+    const title = createCompactTitle(this, (titleLeft + titleRight) / 2, titleY, titleMaxWidth)
+      .setDepth(14).setInteractive({ useHandCursor: true });
 
     // Hidden dev-menu trigger: long-press (~1.5s) on the title opens the
     // parent menu. Kids tapping briefly do nothing.
@@ -232,9 +244,9 @@ export class WorldMapScene extends Phaser.Scene {
       });
     }
 
-    // Top-left cluster: Gear | Logbook
+    // Top-left cluster: Gear | Logbook | Sound
     createIconButton(this, {
-      x: 90, y: 88, radius: 38,
+      x: leftButtons[0], y: buttonY, radius: buttonRadius,
       accentColor: COLORS.accentTeal,
       drawIcon: (g, size) => drawGearIcon(g, 0, 0, size),
       onClick: () => {
@@ -244,7 +256,7 @@ export class WorldMapScene extends Phaser.Scene {
     }).setDepth(15);
 
     createIconButton(this, {
-      x: 186, y: 88, radius: 38,
+      x: leftButtons[1], y: buttonY, radius: buttonRadius,
       accentColor: COLORS.accentWarm,
       drawIcon: (g, size) => drawHelmetIcon(g, 0, 0, size),
       onClick: () => {
@@ -254,7 +266,7 @@ export class WorldMapScene extends Phaser.Scene {
     }).setDepth(15);
 
     createIconButton(this, {
-      x: 282, y: 88, radius: 38,
+      x: leftButtons[2], y: buttonY, radius: buttonRadius,
       accentColor: 0xb6e0ff,
       drawIcon: (g, size) => drawSoundIcon(g, 0, 0, size, 0xffffff, audio.enabled && music.enabled),
       onClick: () => {
@@ -264,13 +276,13 @@ export class WorldMapScene extends Phaser.Scene {
     }).setDepth(15);
 
     // Top-right cluster: Pet | Shop
-    this._petBadgeX = W - 186;
-    this._petBadgeY = 88;
-    this._petBadgeRadius = 38;
+    this._petBadgeX = rightButtons[0];
+    this._petBadgeY = buttonY;
+    this._petBadgeRadius = buttonRadius;
     this.buildPetBadge();
 
     createIconButton(this, {
-      x: W - 90, y: 88, radius: 38,
+      x: rightButtons[1], y: buttonY, radius: buttonRadius,
       accentColor: COLORS.accentPurple,
       drawIcon: (g, size) => drawShoppingBagIcon(g, 0, 0, size),
       onClick: () => {
