@@ -181,3 +181,30 @@ test('Change PIN touch input requires four digits and cancel discards changes', 
   assert.equal(saved.get('cosmicMathParentPin'), '1234');
   assert.equal(scene.input.keyboard.listenerCount('keydown'), 0);
 });
+
+test('Settings tab puts Move to a New iPad first and Reset last, and Move opens the sheet', async () => {
+  const opened = [];
+  const ParentDashboardScene = await loadSubject('../src/scenes/ParentDashboardScene.js', 'ParentDashboardScene', {
+    openTransferSheet: scene => opened.push(scene),
+  });
+  const scene = Object.assign(new ParentDashboardScene(), displayScene());
+  scene.contentContainer = scene.add.container(0, 0);
+  scene.registry = { set() {} };
+  scene.showSettingsTab();
+  const rows = scene.contentContainer.list.filter(object => object.kind === 'container').map(c => ({
+    label: c.list.find(object => object.kind === 'text')?.text,
+    y: c.y,
+    hit: c.list.at(-1),
+  }));
+  assert.deepEqual(rows.map(row => [row.label, row.y]), [
+    ['Move to a New iPad', 360],
+    ['Change PIN', 490],
+    ['Lock Dashboard', 620],
+    ['Reset All Progress', 780],
+  ]);
+  const about = scene.contentContainer.list.find(object => object.kind === 'text' && object.text === 'About difficulty');
+  assert.equal(about.y, 940);
+  rows[0].hit.emit('pointerdown');
+  assert.equal(opened.length, 1);
+  assert.equal(opened[0], scene);
+});

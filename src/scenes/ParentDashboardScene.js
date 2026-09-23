@@ -13,6 +13,7 @@ import { createStarfield } from '../starfieldHelper.js';
 import { drawArrowLeftIcon, drawSoundIcon } from '../StatIcons.js';
 import { COLORS } from '../colorPalette.js';
 import { createPinKeypad } from '../pinKeypad.js';
+import { openTransferSheet } from '../transferSheet.js';
 
 const W = 1080;
 const H = 1920;
@@ -552,13 +553,16 @@ export class ParentDashboardScene extends Phaser.Scene {
 
   // ----- SETTINGS -----
   showSettingsTab() {
+    // Reset sits last, behind a wider gap, so the destructive button is kept
+    // apart from Move to a New iPad.
     let y = 360;
+    this.addSettingButton(y, 'Move to a New iPad', () => openTransferSheet(this), ACCENT); y += 130;
     this.addSettingButton(y, 'Change PIN', () => this.showChangePinDialog(), ACCENT); y += 130;
-    this.addSettingButton(y, 'Reset All Progress', () => this.showResetConfirmation(), WARN); y += 130;
     this.addSettingButton(y, 'Lock Dashboard', () => {
       this.registry.set('parentPinVerified', false);
       this.scene.restart();
     }, 0x8888a0); y += 160;
+    this.addSettingButton(y, 'Reset All Progress', () => this.showResetConfirmation(), WARN); y += 160;
 
     this.contentContainer.add(this.add.text(W / 2, y, 'About difficulty', style('subhead', {
       fontSize: '28px',
