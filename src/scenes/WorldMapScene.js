@@ -33,7 +33,7 @@ import { drawMasteryWall } from '../MasteryWall.js';
 import { paper, ink } from '../homeGround/paper.js';
 import {
   drawSparkleIcon, drawStarIcon,
-  drawGearIcon, drawShoppingBagIcon, drawHelmetIcon, drawSoundIcon
+  drawGearIcon, drawShoppingBagIcon, drawHelmetIcon
 } from '../StatIcons.js';
 import { COLORS } from '../colorPalette.js';
 import { hexStr } from '../colorUtils.js';
@@ -43,7 +43,7 @@ const W = 1080;
 const H = 1920;
 
 const HEADER_LAYOUT = {
-  leftButtons: [90, 186, 282],
+  leftButtons: [90, 186],
   rightButtons: [W - 186, W - 90],
   buttonY: 88,
   buttonRadius: 38,
@@ -187,7 +187,8 @@ export class WorldMapScene extends Phaser.Scene {
     bg.fillStyle(COLORS.bgDark, 0.20);
     bg.fillRect(0, fadeSplit, W, MAP_HEADER_FADE_END - fadeSplit);
 
-    // Center the title in the space between the unequal button groups.
+    // Center the title in the space between the button groups. With two a
+    // side that is the screen center, so it lines up with the chips below.
     const { leftButtons, rightButtons, buttonY, buttonRadius, buttonGlow, titleY, titleGutter } = HEADER_LAYOUT;
     const titleLeft = Math.max(...leftButtons) + buttonRadius + buttonGlow;
     const titleRight = Math.min(...rightButtons) - buttonRadius - buttonGlow;
@@ -244,14 +245,15 @@ export class WorldMapScene extends Phaser.Scene {
       });
     }
 
-    // Top-left cluster: Gear | Logbook | Sound
+    // Top-left cluster: Settings (gear) | Logbook. Sound, Music and the
+    // PIN-locked Grown-ups dashboard all live inside Settings.
     createIconButton(this, {
       x: leftButtons[0], y: buttonY, radius: buttonRadius,
       accentColor: COLORS.accentTeal,
       drawIcon: (g, size) => drawGearIcon(g, 0, 0, size),
       onClick: () => {
         audio.playClick();
-        this.scene.start('ParentDashboardScene');
+        new TransitionManager(this).fadeToScene('SettingsScene');
       }
     }).setDepth(15);
 
@@ -262,16 +264,6 @@ export class WorldMapScene extends Phaser.Scene {
       onClick: () => {
         audio.playClick();
         new TransitionManager(this).fadeToScene('RecordsScene');
-      }
-    }).setDepth(15);
-
-    createIconButton(this, {
-      x: leftButtons[2], y: buttonY, radius: buttonRadius,
-      accentColor: 0xb6e0ff,
-      drawIcon: (g, size) => drawSoundIcon(g, 0, 0, size, 0xffffff, audio.enabled && music.enabled),
-      onClick: () => {
-        audio.playClick();
-        new TransitionManager(this).fadeToScene('SettingsScene');
       }
     }).setDepth(15);
 

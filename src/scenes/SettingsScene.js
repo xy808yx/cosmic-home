@@ -1,6 +1,6 @@
-// Kid-facing settings panel — unified Sound + Music toggles. Reached from the
-// WorldMap top-bar (parent controls live in ParentDashboardScene). Kept small
-// and direct so the toggles are reachable in one tap.
+// Settings, reached from the gear on the WorldMap top bar. Kid-facing Sound +
+// Music toggles, kept one tap away, plus a Grown-ups button into
+// ParentDashboardScene, which asks for the PIN on the way in.
 
 import Phaser from 'phaser';
 import { audio } from '../AudioManager.js';
@@ -69,6 +69,17 @@ export class SettingsScene extends Phaser.Scene {
       align: 'center',
       wordWrap: { width: 800 }
     })).setOrigin(0.5).setDepth(11);
+
+    // Grown-ups: the Parent Dashboard used to be its own gear on the map. It
+    // lives here now, quieter than the toggles, behind the same PIN gate.
+    createButton(this, {
+      x: cardX, y: cardY + cardH / 2 + 300,
+      width: 540, height: 110,
+      label: 'Grown-ups',
+      color: 0x2b3a4a,
+      textOverrides: menuStyle('button', { fill: '#81ecec', fontStyle: '900' }),
+      onClick: () => new TransitionManager(this).fadeToScene('ParentDashboardScene')
+    }).setDepth(13);
 
     new TransitionManager(this).fadeIn(280);
   }

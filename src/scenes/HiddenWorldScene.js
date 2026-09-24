@@ -38,6 +38,27 @@ function fitTextToBox(textObj, message, maxH, sizes) {
   }
 }
 
+// Object labels in every secret room share one style. 32px keeps them near
+// 11pt on a 393pt-wide iPhone; the old 20px read at about 7pt. Each room keeps
+// its own ink colors.
+const ROOM_LABEL_STYLE = { fontSize: '32px', fontStyle: '800', strokeThickness: 5 };
+
+function addRoomLabel(scene, x, y, text, fill, stroke) {
+  return scene.add.text(x, y, text, style('caption', { ...ROOM_LABEL_STYLE, fill, stroke }))
+    .setOrigin(0.5).setDepth(8);
+}
+
+// The message box sizes itself to its text. Rooms dock it in the top strip
+// (the same band the fixed box always used, so it covers nothing new there);
+// the garage docks it at the bottom, in the empty floor strip under the shoe
+// rack, because its top row and the pet climbing on it sit under the top strip.
+// Nothing in the garage is drawn or walks below about y 1730.
+const BUBBLE_DOCK_Y = { top: 420, bottom: 1828 };
+const BUBBLE_MAX_W = 960;
+const BUBBLE_MAX_H = 170;
+const BUBBLE_PAD_X = 48;
+const BUBBLE_PAD_Y = 24;
+
 export class HiddenWorldScene extends Phaser.Scene {
   constructor() {
     super({ key: 'HiddenWorldScene' });
@@ -97,7 +118,7 @@ export class HiddenWorldScene extends Phaser.Scene {
     // Bubble text lives in src/content/dadGarage.js.
     const bubbleFor = id => (GARAGE_ITEMS.find(i => i.id === id)?.bubble) || '';
     const items = [
-      { id: 'freezer',  x: 175,    y: 580,  hitW: 240, hitH: 180, draw: drawChestFreezer, label: 'Chest freezer' },
+      { id: 'freezer',  x: 175,    y: 580,  hitW: 240, hitH: 200, draw: drawChestFreezer, label: 'Chest freezer' },
       { id: 'rack',     x: 470,    y: 580,  hitW: 240, hitH: 320, draw: drawStorageRack,  label: 'Pantry rack' },
       { id: 'bins',     x: 690,    y: 600,  hitW: 200, hitH: 200, draw: drawStorageBins,  label: 'Storage bins' },
       { id: 'squat',    x: 940,    y: 600,  hitW: 220, hitH: 280, draw: drawSquatRack,    label: 'Squat rack' },
@@ -134,12 +155,7 @@ export class HiddenWorldScene extends Phaser.Scene {
       // the 3D printer printing, the laptop glowing, …). No-op for the rest.
       this.animateGarageItem(item.id, node);
 
-      this.add.text(item.x, item.y + item.hitH / 2 + 16, item.label, style('caption', {
-        fontSize: '20px',
-        fill: '#ffd86b',
-        stroke: '#0a0a1a',
-        strokeThickness: 2
-      })).setOrigin(0.5).setDepth(8);
+      addRoomLabel(this, item.x, item.y + item.hitH / 2 + 16, item.label, '#ffd86b', '#0a0a1a');
 
       const hit = this.add.rectangle(item.x, item.y, item.hitW, item.hitH, 0, 0)
         .setInteractive({ useHandCursor: true }).setDepth(9);
@@ -150,7 +166,7 @@ export class HiddenWorldScene extends Phaser.Scene {
           this.showUnlockCelebration();
           return;
         }
-        this.showBubble(item.x, item.y, item.bubble);
+        this.showBubble(item.x, item.y, item.bubble, { dock: 'bottom' });
         // The companion goes and does the thing the bubble is about.
         this.garagePetInteract(item.id);
       });
@@ -264,21 +280,27 @@ export class HiddenWorldScene extends Phaser.Scene {
     bg.fillEllipse(W / 2, 1280, W * 1.3, 800);
   }
 
-  showBubble(x, y, text) {
+  // x, y are unused: every message sits centered in its room's dock (see
+  // BUBBLE_DOCK_Y). Long copy steps down a size, then trims, rather than
+  // outgrowing the dock.
+  showBubble(x, y, text, { dock = 'top' } = {}) {
     if (this._bubble) this._bubble.destroy();
-    const bubble = this.add.container(W / 2, 420).setDepth(20);
-    const bg = this.add.graphics();
-    bg.fillStyle(0xfff5d8, 0.98);
-    bg.fillRoundedRect(-440, -90, 880, 180, 24);
-    bg.lineStyle(3, 0x2a1f12, 1);
-    bg.strokeRoundedRect(-440, -90, 880, 180, 24);
-    bubble.add(bg);
+    const bubble = this.add.container(W / 2, BUBBLE_DOCK_Y[dock]).setDepth(20);
     const t = this.add.text(0, 0, text, style('body', {
-      fontSize: '30px',
+      fontSize: '42px',
       fill: '#2a1f12',
       align: 'center',
-      wordWrap: { width: 820 }
+      wordWrap: { width: BUBBLE_MAX_W - BUBBLE_PAD_X * 2 }
     })).setOrigin(0.5);
+    fitTextToBox(t, text, BUBBLE_MAX_H - BUBBLE_PAD_Y * 2, [42, 38, 34, 30]);
+    const bw = Math.min(BUBBLE_MAX_W, t.width + BUBBLE_PAD_X * 2);
+    const bh = t.height + BUBBLE_PAD_Y * 2;
+    const bg = this.add.graphics();
+    bg.fillStyle(0xfff5d8, 0.98);
+    bg.fillRoundedRect(-bw / 2, -bh / 2, bw, bh, 24);
+    bg.lineStyle(3, 0x2a1f12, 1);
+    bg.strokeRoundedRect(-bw / 2, -bh / 2, bw, bh, 24);
+    bubble.add(bg);
     bubble.add(t);
     bubble.alpha = 0;
     bubble.setScale(0.9);
@@ -1884,8 +1906,10 @@ export class HiddenWorldScene extends Phaser.Scene {
     // Roomy 3-row layout across the woodchips; the running track is a separate
     // full-width band along the very bottom (added after this loop).
     const items = [
+      // labelDx: the slide's ladder stands inside the tower's right edge, so the
+      // tower's label sits a little left of center to clear it.
       { id: 'tower',   x: 250,  y: 900,  hitW: 320, hitH: 420, draw: drawPlayStructure, label: 'Play tower',
-        bubble: "You can't catch me!" },
+        labelDx: -20, bubble: "You can't catch me!" },
       { id: 'slide',   x: 470,  y: 980,  hitW: 270, hitH: 400, draw: drawWavySlide,     label: 'Big slide',
         bubble: 'Cheeeeoooh!' },
       { id: 'bars',    x: 840,  y: 920,  hitW: 360, hitH: 360, draw: drawMonkeyBars,    label: 'Monkey bars',
@@ -1918,12 +1942,7 @@ export class HiddenWorldScene extends Phaser.Scene {
         ease: 'Sine.easeInOut'
       });
 
-      this.add.text(item.x, item.y + item.hitH / 2 + 14, item.label, style('caption', {
-        fontSize: '20px',
-        fill: '#ffffff',
-        stroke: '#1a3a18',
-        strokeThickness: 3
-      })).setOrigin(0.5).setDepth(8);
+      addRoomLabel(this, item.x + (item.labelDx || 0), item.y + item.hitH / 2 + 14, item.label, '#ffffff', '#1a3a18');
 
       const hit = this.add.rectangle(item.x, item.y, item.hitW, item.hitH, 0, 0)
         .setInteractive({ useHandCursor: true }).setDepth(9);
@@ -1944,9 +1963,9 @@ export class HiddenWorldScene extends Phaser.Scene {
     // The running track spans the entire bottom of the screen (drawn in the
     // backdrop). One full-width hit zone lets the pet dash a lap.
     const trackTop = H - 178;
-    this.add.text(W / 2, trackTop + 24, 'RUNNING TRACK', style('caption', {
-      fontSize: '20px', fill: '#f4f8ff', stroke: '#173a63', strokeThickness: 3
-    })).setOrigin(0.5).setDepth(9);
+    // Second lane, so the full-size label clears "Dad's notes" standing on the
+    // track's edge above it.
+    addRoomLabel(this, W / 2, trackTop + 66, 'RUNNING TRACK', '#f4f8ff', '#173a63').setDepth(9);
     const trackHit = this.add.rectangle(W / 2, (trackTop + H) / 2, W, H - trackTop, 0, 0)
       .setInteractive({ useHandCursor: true }).setDepth(9);
     trackHit.on('pointerdown', () => {
@@ -2124,9 +2143,7 @@ export class HiddenWorldScene extends Phaser.Scene {
     })).setOrigin(0.5));
 
     // Ground label, matching the other equipment.
-    this.add.text(x, y + 132, "Dad's notes", style('caption', {
-      fontSize: '20px', fill: '#ffffff', stroke: labelStroke, strokeThickness: 3
-    })).setOrigin(0.5).setDepth(8);
+    addRoomLabel(this, x, y + 132, "Dad's notes", '#ffffff', labelStroke);
 
     // NEW +10 ✨ badge on a fresh day; fades + stops bobbing on tap.
     let badge = null;
@@ -2475,12 +2492,7 @@ export class HiddenWorldScene extends Phaser.Scene {
       }
       this.animateHotPotItem(item.id, node);
 
-      this.add.text(item.x, item.y + item.hitH / 2 + 16, item.label, style('caption', {
-        fontSize: '20px',
-        fill: '#ffe0b0',
-        stroke: '#2a1008',
-        strokeThickness: 3
-      })).setOrigin(0.5).setDepth(8);
+      addRoomLabel(this, item.x, item.y + item.hitH / 2 + 16, item.label, '#ffe0b0', '#2a1008');
 
       const hit = this.add.rectangle(item.x, item.y, item.hitW, item.hitH, 0, 0)
         .setInteractive({ useHandCursor: true }).setDepth(9);
@@ -4389,13 +4401,15 @@ function drawBrothStation(g) {
   urn(-52, 0xd9b070, 0xc9c3bb);   // clear / bone broth
   urn(52, 0xc03a28, 0xc9c3bb);    // spicy
 
-  // Spice-level dial: four dots getting redder, left to right.
+  // Spice-level dial: four dots getting redder, left to right. It sits on the
+  // counter's front face, under the spigots, so nothing hangs down into the
+  // "Broth + spice" label.
   g.fillStyle(0x3f2a1c, 1);
-  g.fillRoundedRect(-56, 96, 112, 28, 8);
+  g.fillRoundedRect(-56, 58, 112, 24, 8);
   const heat = [0xf3ecdc, 0xf6c368, 0xe8763f, 0xc03a28];
   heat.forEach((h, i) => {
     g.fillStyle(h, 1);
-    g.fillCircle(-38 + i * 25, 110, 8);
+    g.fillCircle(-38 + i * 25, 70, 7);
   });
 }
 
