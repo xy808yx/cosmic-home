@@ -9,6 +9,7 @@ import { style } from '../textStyles.js';
 import { createButton } from '../buttonHelper.js';
 import { createModal } from '../modalHelper.js';
 import { companion, drawCompanion } from '../CompanionManager.js';
+import { anchorXY } from '../PetSprites.js';
 import { cosmetics } from '../CosmeticManager.js';
 import { GARAGE_ITEMS } from '../content/dadGarage.js';
 import { HOTPOT_ITEMS } from '../content/hotPot.js';
@@ -91,10 +92,7 @@ export class HiddenWorldScene extends Phaser.Scene {
       strokeThickness: 5
     })).setOrigin(0.5).setDepth(5);
 
-    // Whiteboard with today's note + pet companion (added before item loop so
-    // they sit at the right depth).
     this.createWhiteboard();
-    this.createGaragePet();
 
     // Bubble text lives in src/content/dadGarage.js.
     const bubbleFor = id => (GARAGE_ITEMS.find(i => i.id === id)?.bubble) || '';
@@ -111,11 +109,15 @@ export class HiddenWorldScene extends Phaser.Scene {
       { id: 'shoes',    x: W / 2,  y: 1560, hitW: 760, hitH: 200, draw: drawShoeRack,     label: 'Running shoes' }
     ].map(it => ({ ...it, bubble: bubbleFor(it.id) }));
 
+    // Fresh node table every visit: a stale one would hand the pet destroyed
+    // objects from the last time the room was built.
+    this._garageNode = {};
     for (const item of items) {
       const node = this.add.container(item.x, item.y).setDepth(8);
       const g = this.add.graphics();
       item.draw(g);
       node.add(g);
+      this._garageNode[item.id] = node;
       // Gentle "breathing" baseline so every object feels alive. The stroller
       // brings its own rocking motion instead (a scale + rock combo reads odd).
       if (item.id !== 'stroller') {
@@ -149,8 +151,13 @@ export class HiddenWorldScene extends Phaser.Scene {
           return;
         }
         this.showBubble(item.x, item.y, item.bubble);
+        // The companion goes and does the thing the bubble is about.
+        this.garagePetInteract(item.id);
       });
     }
+
+    // After the objects: the pet's routines use the node table above.
+    this.createGaragePet();
 
     const leaveBtn = createButton(this, {
       x: W - 130, y: 100, label: 'Leave',
@@ -302,10 +309,17 @@ export class HiddenWorldScene extends Phaser.Scene {
     cosmetics.addAndEquip('acc_dad_glasses');
     audio.playMatch?.();
 
+    // However the card is dismissed (Sweet, or a tap anywhere on the dim), the
+    // pet puts on the freshly-equipped glasses and goes to dig through the bins
+    // where they were found.
     const { card, close } = createModal(this, {
       width: 880, height: 660,
       accentColor: 0xffd86b,
-      showCloseHint: false
+      showCloseHint: false,
+      onClose: () => {
+        this.refreshGaragePet();
+        this.garagePetInteract('bins');
+      }
     });
     card.add(this.add.text(0, -220, 'YOU FOUND IT!', style('display', {
       fontSize: '60px',
@@ -336,11 +350,7 @@ export class HiddenWorldScene extends Phaser.Scene {
       textOverrides: { fontSize: '28px', fill: '#0a0a1a', fontStyle: '900' },
       // Stay in the garage after finding the glasses — just dismiss the card.
       // The kid keeps exploring and leaves on their own via the Leave button.
-      // Refresh the in-scene pet so it's wearing the freshly-equipped glasses.
-      onClick: () => {
-        this.refreshGaragePet();
-        close();
-      }
+      onClick: () => close()
     }));
     return card;
   }
@@ -476,76 +486,53 @@ export class HiddenWorldScene extends Phaser.Scene {
     })).setOrigin(0.5));
   }
 
+  // ----------------------------------------------------------
+  // GARAGE PET: roams the garage and uses each object in turn.
+  // ----------------------------------------------------------
+  // It walks to an object, does that object's routine (sits in the ebike seat,
+  // climbs into the stroller, watches a print...), rests a moment, then takes
+  // the next stop off a shuffled deck. Tapping an object queues that object
+  // next: a tap cuts a rest short but never a routine in progress, so no lid is
+  // left open and no bike is left mid-roll. Every routine takes a `done`
+  // callback and hands the pet back on the floor, out of any object.
+  //
+  // Routines that put the pet IN something move it inside that object's node
+  // (_gpEnter), under the object's front piece (_gpBehind): it then breathes
+  // and rocks with the object, and the front piece hides its lower half.
   createGaragePet() {
+    // Reset first: these fields outlive the scene, and a stale pet, a busy flag
+    // or a queued tap left over from a mid-routine exit would wedge the next visit.
+    this._garagePetContainer = null;
+    this._garagePetSprite = null;
+    this._gpBusy = false;
+    this._gpQueued = null;
+    this._gpRestTimer = null;
+    this._gpIdleTween = null;
+    this._gpHeld = null;
+    this._gpHost = null;
+    this._gpHostNode = null;
+    this._gpDeck = [];
+    this._gpLast = null;
+    this._gpFacing = -1;
     if (!companion.hasStarter()) return;
-    const spots = [
-      { x: 940, y: 520 },   // perched above squat rack
-      { x: 180, y: 460 },   // under the heat lamp
-      { x: 215, y: 880 },   // on the laptop
-      { x: 470, y: 1170 }   // beside the bikes
-    ];
-    let idx = Math.floor(Math.random() * spots.length);
-    const start = spots[idx];
 
-    const petContainer = this.add.container(start.x, start.y).setDepth(11);
-    this._garagePetContainer = petContainer;
+    const pet = this.add.container(540, 0).setDepth(11);
+    this._garagePetContainer = pet;
     this._garagePetSprite = drawCompanion(this, 0, 0, { scale: 1.1 });
-    petContainer.add(this._garagePetSprite);
-
-    // Subtle idle bob
-    this.tweens.add({
-      targets: petContainer,
-      y: start.y - 8,
-      duration: 1600,
-      yoyo: true,
-      repeat: -1,
-      ease: 'Sine.easeInOut'
-    });
+    pet.add(this._garagePetSprite);
+    // Starts on the open floor between the desk row and the bikes.
+    pet.y = 1180 - this._gpFoot();
 
     // Tap → chirp + heart particle
     const hit = this.add.rectangle(0, 0, 130, 130, 0, 0)
       .setInteractive({ useHandCursor: true });
-    petContainer.add(hit);
+    pet.add(hit);
     hit.on('pointerdown', () => {
       audio.playPetChirp?.();
-      const heart = this.add.text(petContainer.x + 40, petContainer.y - 40, '♥', style('display', {
-        fontSize: '36px',
-        fill: '#ff9ec7'
-      })).setOrigin(0.5).setDepth(20);
-      this.tweens.add({
-        targets: heart,
-        y: heart.y - 50, alpha: 0,
-        duration: 700,
-        onComplete: () => heart.destroy()
-      });
+      this._gpEmote('♥');
     });
 
-    // Wander to a new spot every ~15s.
-    this.time.addEvent({
-      delay: 15000,
-      loop: true,
-      callback: () => {
-        let next = idx;
-        while (next === idx) next = Math.floor(Math.random() * spots.length);
-        idx = next;
-        const target = spots[idx];
-        // Quick hop fade
-        this.tweens.add({
-          targets: petContainer,
-          alpha: 0,
-          scale: 0.7,
-          duration: 240,
-          onComplete: () => {
-            petContainer.x = target.x;
-            petContainer.y = target.y;
-            this.tweens.add({
-              targets: petContainer,
-              alpha: 1, scale: 1, duration: 240, ease: 'Back.easeOut'
-            });
-          }
-        });
-      }
-    });
+    this._gpRest(1200);
   }
 
   // Redraw the in-scene garage pet so a cosmetic equipped mid-visit (e.g. Dad's
@@ -557,25 +544,1054 @@ export class HiddenWorldScene extends Phaser.Scene {
     this._garagePetSprite = drawCompanion(this, 0, 0, { scale: 1.1 });
     // addAt(…, 0) keeps the pet below the transparent tap hit-rect.
     this._garagePetContainer.addAt(this._garagePetSprite, 0);
+    this._gpFace(this._gpFacing);
+  }
+
+  // A tap on an object: that object is next. Starts right away if the pet is
+  // resting; otherwise it runs as soon as the current routine finishes.
+  garagePetInteract(id) {
+    if (!this._garagePetContainer?.active) return;
+    this._gpQueued = id;
+    if (!this._gpBusy) this._gpNext();
+  }
+
+  _gpNext() {
+    const pet = this._garagePetContainer;
+    if (!pet?.active || this._gpBusy) return;
+    this._gpRestTimer?.remove(false);
+    this._gpRestTimer = null;
+    this._gpIdleTween?.stop();
+    this._gpIdleTween = null;
+    pet.angle = 0;
+    const queued = this._gpQueued;
+    const id = queued || this._gpDraw();
+    this._gpQueued = null;
+    // A tapped stop comes off this round's deck, so it can't come straight
+    // back as the next random pick.
+    if (queued) {
+      const i = this._gpDeck.indexOf(queued);
+      if (i >= 0) this._gpDeck.splice(i, 1);
+    }
+    this._gpLast = id;
+    this._gpBusy = true;
+    const routine = {
+      freezer:  this.gpFreezerDive,
+      rack:     this.gpRackSnack,
+      bins:     this.gpBinsRummage,
+      squat:    this.gpSquats,
+      laptop:   this.gpLaptopType,
+      printer:  this.gpWatchPrint,
+      stroller: this.gpStrollerClimb,
+      bikes:    this.gpBikeRide,
+      ebike:    this.gpEbikeSeat,
+      shoes:    this.gpShoeZoom,
+      lamp:     this.gpBaskUnderLamp
+    }[id];
+    routine.call(this, () => this._gpRest());
+  }
+
+  // Every stop once per shuffled round, never the same one twice in a row.
+  _gpDraw() {
+    if (!this._gpDeck.length) {
+      const ids = ['freezer', 'rack', 'bins', 'squat', 'laptop', 'printer',
+        'stroller', 'bikes', 'ebike', 'shoes', 'lamp'];
+      Phaser.Utils.Array.Shuffle(ids);
+      if (ids[0] === this._gpLast) ids.push(ids.shift());
+      this._gpDeck = ids;
+    }
+    return this._gpDeck.shift();
+  }
+
+  // Between routines: stand and look around, then go. A queued tap keeps the
+  // pause short.
+  _gpRest(ms) {
+    const pet = this._garagePetContainer;
+    if (!pet?.active) return;
+    if (this._gpHost) this._gpExit();
+    this._gpDrop();
+    pet.setScale(1);
+    pet.angle = 0;
+    this._gpBusy = false;
+    if (ms == null) ms = this._gpQueued ? 250 : 2200 + Math.random() * 2400;
+    const face0 = this._gpFacing;
+    const look = { p: 0 };
+    this._gpIdleTween = this.tweens.add({
+      targets: look, p: 1, duration: ms,
+      onUpdate: () => {
+        if (ms > 900) {
+          const want = (look.p > 0.4 && look.p < 0.75) ? -face0 : face0;
+          if (want !== this._gpFacing) this._gpFace(want);
+        }
+        pet.angle = Math.sin(look.p * Math.PI * 2) * 3;
+      }
+    });
+    this._gpRestTimer = this.time.delayedCall(ms, () => this._gpNext());
+  }
+
+  // ----- Garage pet helpers -----
+
+  // Distance from the pet's origin down to its feet at a given scale. Sprites
+  // differ a lot by species and stage (an egg is ~100px tall, an ember adult
+  // ~150px), so every "stand on" / "sit in" spot is worked out from this.
+  _gpFoot(scale = this._garagePetContainer?.scaleY ?? 1) {
+    const layout = this._garagePetSprite?.layout;
+    return (layout ? layout.height / 2 : 60) * 1.1 * scale;
+  }
+
+  // How far the pet's eyes sit above its origin at a given scale (negative is
+  // up), from the sprite's own head_eye anchor. Tide adults are short and wide
+  // with low-set eyes, ember adults tall with high ones, so a fixed fraction of
+  // the height hides some pets' eyes below a rim.
+  _gpEyeY(scale = this._garagePetContainer?.scaleY ?? 1) {
+    const spr = this._garagePetSprite;
+    if (!spr?.layout || !spr.species) return -this._gpFoot(scale) * 0.4;
+    return anchorXY(spr.species.id, spr.stage, 'head_eye', spr.layout).y * 1.1 * scale;
+  }
+
+  // Origin y that sinks the pet into something (freezer, bin, bassinet, shoe)
+  // with its eyes just clear of the rim at `rimY`.
+  _gpPeek(rimY, scale) {
+    return rimY - 20 * scale - this._gpEyeY(scale);
+  }
+
+  // Half the pet's width at a given scale (for holding things at its side).
+  _gpHalfW(scale = this._garagePetContainer?.scaleX ?? 1) {
+    const layout = this._garagePetSprite?.layout;
+    return (layout ? layout.width / 2 : 60) * 1.1 * scale;
+  }
+
+  // Pet sprites face left by default; mirror the sprite to face right.
+  _gpFace(dir) {
+    this._gpFacing = dir > 0 ? 1 : -1;
+    const s = this._garagePetSprite;
+    if (s) s.scaleX = Math.abs(s.scaleY) * (this._gpFacing > 0 ? -1 : 1);
+  }
+
+  // A point in an object's own coordinates, in scene coordinates.
+  _gpAt(host, x, y) {
+    return host.getWorldTransformMatrix().transformPoint(x, y);
+  }
+
+  // Where the pet is in scene coordinates, hosted or not.
+  _gpWorld() {
+    const pet = this._garagePetContainer;
+    return this._gpHost ? this._gpAt(this._gpHost, pet.x, pet.y) : { x: pet.x, y: pet.y };
+  }
+
+  // A little heart / letter floating up off the pet's head.
+  _gpEmote(text, color = '#ff9ec7', size = 36) {
+    const at = this._gpWorld();
+    const t = this.add.text(at.x + 30, at.y - this._gpFoot() - 6, text, style('display', {
+      fontSize: size + 'px', fill: color
+    })).setOrigin(0.5).setDepth(20);
+    this.tweens.add({
+      targets: t, y: t.y - 50, alpha: 0, duration: 800,
+      onComplete: () => t.destroy()
+    });
+  }
+
+  // Hop-walk to a scene point, facing the way it's going. Only used while the
+  // pet is in the scene (never while hosted). Always calls back on a later
+  // frame, even when the pet is already there (a second tap on the same
+  // object): routines declare their steps after starting the walk.
+  _gpWalkTo(x, y, cb) {
+    const pet = this._garagePetContainer;
+    const sx = pet.x, sy = pet.y;
+    const dist = Phaser.Math.Distance.Between(sx, sy, x, y);
+    if (dist < 4) { this.time.delayedCall(1, () => cb?.()); return; }
+    if (Math.abs(x - sx) > 6) this._gpFace(x > sx ? 1 : -1);
+    const steps = Math.max(2, Math.round(dist / 64));
+    const drv = { p: 0 };
+    this.tweens.add({
+      targets: drv, p: 1, duration: 260 + dist * 0.9, ease: 'Sine.easeInOut',
+      onUpdate: () => {
+        const p = drv.p;
+        pet.x = sx + (x - sx) * p;
+        pet.y = sy + (y - sy) * p - Math.abs(Math.sin(p * Math.PI * steps)) * 12;
+        pet.angle = Math.sin(p * Math.PI * steps) * 4;
+      },
+      onComplete: () => { pet.x = x; pet.y = y; pet.angle = 0; cb?.(); }
+    });
+  }
+
+  // Move the pet inside `host` (an object's node, or a part of one like the
+  // orange bike) keeping it where it is on screen. From here on the pet's x/y
+  // are in the host's own coordinates, the same ones its art is drawn in.
+  _gpEnter(host) {
+    const pet = this._garagePetContainer;
+    const local = host.getWorldTransformMatrix().applyInverse(pet.x, pet.y);
+    host.add(pet);
+    pet.setPosition(local.x, local.y);
+    this._gpHost = host;
+    // Lift the whole object above its neighbours and their labels meanwhile,
+    // remembering its slot so _gpExit can put it back exactly there.
+    this._gpHostNode = host.parentContainer || host;
+    this._gpHostSlot = this.children.getIndex(this._gpHostNode);
+    this._gpHostNode.setDepth(10);
+  }
+
+  // Back out into the scene, same spot on screen, off any front piece.
+  _gpExit() {
+    const pet = this._garagePetContainer;
+    const host = this._gpHost;
+    if (!host) return;
+    const at = this._gpAt(host, pet.x, pet.y);
+    host.remove(pet);
+    // Container.remove leaves the add-time destroy listener on the pet; drop it
+    // so a stale host never tries to un-parent the pet at scene shutdown.
+    pet.off(Phaser.GameObjects.Events.DESTROY, host.onChildDestroyed, host);
+    pet.setPosition(at.x, at.y);
+    pet.angle = 0;
+    // setDepth(8) alone would re-sort the node to the END of the depth-8 band
+    // (the sort is stable), drawing it over its neighbours' labels from then on.
+    this._gpHostNode.setDepth(8);
+    this.children.moveTo(this._gpHostNode, this._gpHostSlot);
+    this._gpHost = null;
+    this._gpHostNode = null;
+  }
+
+  // Tuck the hosted pet under a front piece (and show the piece) / bring it
+  // back out on top of everything in the host.
+  _gpBehind(front) {
+    front.setVisible(true);
+    this._gpHost.moveBelow(this._garagePetContainer, front);
+  }
+  _gpInFront() {
+    this._gpHost.bringToTop(this._garagePetContainer);
+  }
+
+  // Tween to (x, y) in whatever space the pet is in.
+  _gpTo(x, y, dur, cb, ease = 'Quad.easeInOut') {
+    this.tweens.add({
+      targets: this._garagePetContainer, x, y, duration: dur, ease,
+      onComplete: () => cb?.()
+    });
+  }
+
+  // Jump along an arc to (x, y), `h` px above the straight line at its peak.
+  // `scale` resizes on the way (how it tucks in to fit a seat); `onMid` runs
+  // once, just past the peak (used to drop in behind a front piece).
+  _gpJump(x, y, h, dur, cb, { scale = null, onMid = null } = {}) {
+    const pet = this._garagePetContainer;
+    const sx = pet.x, sy = pet.y, s0 = pet.scaleX;
+    let mid = false;
+    const drv = { p: 0 };
+    this.tweens.add({
+      targets: drv, p: 1, duration: dur, ease: 'Linear',
+      onUpdate: () => {
+        const p = drv.p;
+        pet.x = sx + (x - sx) * p;
+        pet.y = sy + (y - sy) * p - Math.sin(p * Math.PI) * h;
+        if (scale != null) pet.setScale(s0 + (scale - s0) * p);
+        if (!mid && p >= 0.6) { mid = true; onMid?.(); }
+      },
+      onComplete: () => {
+        pet.x = x; pet.y = y;
+        if (scale != null) pet.setScale(scale);
+        if (!mid) onMid?.();
+        cb?.();
+      }
+    });
+  }
+
+  // `n` quick hops in place.
+  _gpHop(n, h, cb) {
+    const pet = this._garagePetContainer;
+    const y0 = pet.y;
+    this.tweens.add({
+      targets: pet, y: y0 - h, duration: 150, yoyo: true, repeat: n - 1,
+      ease: 'Sine.easeOut', onComplete: () => { pet.y = y0; cb?.(); }
+    });
+  }
+
+  // Squash on landing, feet kept planted.
+  _gpSquash(cb, amt = 0.16) {
+    const pet = this._garagePetContainer;
+    const s = pet.scaleY, y0 = pet.y, foot = this._gpFoot(s);
+    this.tweens.add({
+      targets: pet, scaleX: s * (1 + amt), scaleY: s * (1 - amt), y: y0 + foot * amt,
+      duration: 110, yoyo: true, ease: 'Sine.easeOut',
+      onComplete: () => { pet.setScale(s); pet.y = y0; cb?.(); }
+    });
+  }
+
+  // A few quick side-to-side jitters (a shiver, a scrabble, a dig).
+  _gpJitter(n, dx, cb, dAngle = 0) {
+    const pet = this._garagePetContainer;
+    const x0 = pet.x;
+    this.tweens.add({
+      targets: pet, x: x0 + dx, angle: dAngle, duration: 45, yoyo: true, repeat: n - 1,
+      ease: 'Sine.easeInOut', onComplete: () => { pet.x = x0; pet.angle = 0; cb?.(); }
+    });
+  }
+
+  // Carry a scene-level prop: it follows the pet (hosted or not) every frame
+  // at an offset until _gpDrop(). The ticker is a tween, so it dies with the scene.
+  _gpHold(obj, ox, oy) {
+    this._gpDrop();
+    const follow = () => {
+      if (!obj.active) return;
+      const at = this._gpWorld();
+      obj.setPosition(at.x + ox, at.y + oy);
+    };
+    follow();
+    this._gpHeld = this.tweens.addCounter({ from: 0, to: 1, duration: 1000, repeat: -1, onUpdate: follow });
+  }
+  _gpDrop() {
+    this._gpHeld?.stop();
+    this._gpHeld = null;
+  }
+
+  // Soft puffs at a scene point (dust off a landing, chalk, crumbs).
+  _gpPuffs(x, y, color, n = 5, spread = 40, rise = 30) {
+    for (let i = 0; i < n; i++) {
+      const d = this.add.graphics().setDepth(12);
+      d.fillStyle(color, 0.85);
+      d.fillCircle(0, 0, 3 + Math.random() * 4);
+      d.setPosition(x + (Math.random() - 0.5) * spread, y);
+      this.tweens.add({
+        targets: d,
+        x: d.x + (Math.random() - 0.5) * spread,
+        y: y - rise * (0.5 + Math.random()),
+        alpha: 0,
+        duration: 500 + Math.random() * 300,
+        ease: 'Sine.easeOut',
+        onComplete: () => d.destroy()
+      });
+    }
+  }
+
+  // ----- Garage pet routines, one per stop -----
+  // Positions are in each object's own coordinates (the ones its renderer
+  // draws in), worked out from the pet's size via _gpFoot so small eggs and
+  // big adults both land on the seat, in the bin, under the bar.
+
+  // Chest freezer (175,580): heave the lid up, climb in, shiver in the cold
+  // with frost puffing out, pop back out with an ice pop and eat it.
+  gpFreezerDive(done) {
+    const node = this._garageNode?.freezer;
+    const parts = node?.gParts;
+    if (!parts) { done(); return; }
+    const pet = this._garagePetContainer;
+    const S = 0.78;
+    const f = this._gpFoot(S);
+    const lift = { x: 40, y: 90 - this._gpFoot(1) };
+    const stand = { x: 150, y: 90 - this._gpFoot(1) };
+    const inside = { x: 0, y: this._gpPeek(-20, S) };
+    const at = this._gpAt(node, lift.x, lift.y);
+    this._gpWalkTo(at.x, at.y, () => {
+      parts.pause();
+      this._gpEnter(node);
+      this._gpFace(-1);
+      // A big stretch up as the lid swings open and the cold spills out.
+      const y0 = pet.y;
+      this.tweens.add({ targets: parts.glow, alpha: 1, duration: 360 });
+      this.tweens.add({
+        targets: parts.lid, y: -30, angle: -11, duration: 460, ease: 'Back.easeOut',
+        onComplete: () => this._freezerFrost(node)
+      });
+      this.tweens.add({
+        targets: pet, scaleY: 1.12, y: y0 - this._gpFoot(1) * 0.12,
+        duration: 260, yoyo: true, hold: 200, ease: 'Sine.easeOut',
+        onComplete: () => {
+          pet.setScale(1);
+          pet.y = y0;
+          this._gpJump(inside.x, inside.y, 110, 520, () => this._gpSquash(shiver),
+            { scale: S, onMid: () => this._gpBehind(parts.front) });
+        }
+      });
+    });
+    const shiver = () => {
+      this._freezerFrost(node);
+      this._gpJitter(10, 4, () => {
+        this._freezerFrost(node);
+        // Up it comes, holding an ice pop.
+        const pop = this._gpIcePop();
+        pop.setScale(0);
+        this._gpHold(pop, this._gpHalfW(1) * 0.85, -f * 0.3);
+        this.tweens.add({ targets: pop, scale: 1.3, duration: 220, ease: 'Back.easeOut' });
+        this._gpTo(inside.x, inside.y - f * 0.5, 240, () => {
+          this._gpInFront();
+          parts.front.setVisible(false);
+          this._gpJump(stand.x, stand.y, 70, 480, () => {
+            this.tweens.add({ targets: parts.lid, y: 0, angle: 0, duration: 420, ease: 'Quad.easeIn' });
+            this.tweens.add({ targets: parts.glow, alpha: 0, duration: 380 });
+            this._gpExit();
+            parts.resume();
+            this._gpEat(pop, done);
+          }, { scale: 1 });
+        }, 'Back.easeOut');
+      });
+    };
+  }
+
+  // Heat lamp (hangs over the freezer): hop up onto the closed freezer lid right
+  // under the red lamp and bask in the warm glow, swaying, very content.
+  gpBaskUnderLamp(done) {
+    const node = this._garageNode?.freezer;
+    const parts = node?.gParts;
+    if (!parts) { done(); return; }
+    const pet = this._garagePetContainer;
+    const S = 0.9;
+    const stand = { x: 160, y: 90 - this._gpFoot(1) };
+    const perch = { x: 6, y: -64 - this._gpFoot(S) };
+    const at = this._gpAt(node, stand.x, stand.y);
+    this._gpWalkTo(at.x, at.y, () => {
+      // The lid goes down and stays down while the pet sits on it.
+      parts.pause();
+      this.tweens.add({ targets: parts.lid, y: 0, angle: 0, duration: 200 });
+      this.tweens.add({ targets: parts.glow, alpha: 0, duration: 200 });
+      this._gpEnter(node);
+      this._gpFace(-1);
+      this._gpJump(perch.x, perch.y, 70, 480, () => this._gpSquash(() => {
+        const w = this._gpWorld();
+        const warm = this.add.graphics().setDepth(12);
+        warm.fillStyle(0xff5a3a, 1);
+        warm.fillEllipse(0, 0, 150, 170);
+        warm.setBlendMode(Phaser.BlendModes.ADD).setAlpha(0);
+        warm.setPosition(w.x, w.y - 10);
+        this.tweens.add({
+          targets: warm, alpha: 0.22, duration: 700, yoyo: true, hold: 1400,
+          onComplete: () => warm.destroy()
+        });
+        this.tweens.add({ targets: pet, angle: 5, duration: 700, yoyo: true, repeat: 1, ease: 'Sine.easeInOut' });
+        this.time.delayedCall(1300, () => this._gpEmote('♥'));
+        this.time.delayedCall(2900, () => {
+          pet.angle = 0;
+          this._gpJump(stand.x, stand.y, 60, 480, () => {
+            this._gpExit();
+            parts.resume();
+            done();
+          }, { scale: 1 });
+        });
+      }), { scale: S });
+    });
+  }
+
+  // Pantry rack (470,580): climb the shelves like a ladder, pull the chip bag
+  // off the top shelf, munch (crumbs everywhere), put it back, jump down.
+  gpRackSnack(done) {
+    const node = this._garageNode?.rack;
+    const parts = node?.gParts;
+    if (!parts) { done(); return; }
+    const pet = this._garagePetContainer;
+    const S = 0.78;
+    const f = this._gpFoot(S);
+    const stand = { x: 60, y: 150 - this._gpFoot(1) };
+    // Standing on the bottom, third and second shelves (tops at 100, 20, -60).
+    const shelves = [{ x: 30, y: 100 - f }, { x: 0, y: 20 - f }, { x: -34, y: -60 - f }];
+    const at = this._gpAt(node, stand.x, stand.y);
+    this._gpWalkTo(at.x, at.y, () => {
+      this._gpEnter(node);
+      this._gpFace(-1);
+      climb(0);
+    });
+    const climb = (i) => {
+      this._gpJump(shelves[i].x, shelves[i].y, 34, 300, () => {
+        if (i + 1 < shelves.length) this.time.delayedCall(60, () => climb(i + 1));
+        else this._gpSquash(grab, 0.1);
+      }, i === 0 ? { scale: S } : {});
+    };
+    const grab = () => {
+      // The bag comes off the shelf into its paws, in front of it.
+      node.bringToTop(parts.bag);
+      this.tweens.add({
+        targets: parts.bag, x: pet.x - 16, y: pet.y - f * 0.1, angle: -14,
+        duration: 320, ease: 'Back.easeOut',
+        onComplete: () => munch(0)
+      });
+    };
+    const munch = (k) => {
+      this._gpSquash(() => {
+        const b = this._gpAt(node, parts.bag.x, parts.bag.y - 22);
+        this._gpPuffs(b.x, b.y, 0xfbd087, 4, 30, -34);
+        this.tweens.add({ targets: parts.bag, angle: k % 2 ? -8 : -20, duration: 90, yoyo: true });
+        if (k < 2) this.time.delayedCall(160, () => munch(k + 1));
+        else this.time.delayedCall(220, putBack);
+      }, 0.12);
+    };
+    const putBack = () => {
+      this.tweens.add({
+        targets: parts.bag, x: parts.home.x, y: parts.home.y, angle: 0,
+        duration: 300, ease: 'Quad.easeInOut',
+        onComplete: () => this._gpJump(stand.x, stand.y, 50, 520,
+          () => this._gpSquash(() => { this._gpExit(); done(); }), { scale: 1 })
+      });
+    };
+  }
+
+  // Storage bins (690,600): jump on top, pop the lid off, hop in and dig.
+  // Odds and ends fly out and drop back in, then it climbs out and the lid
+  // goes back on. (Never unlocks the glasses: only a kid's tap does that.)
+  gpBinsRummage(done) {
+    const node = this._garageNode?.bins;
+    const parts = node?.gParts;
+    if (!parts) { done(); return; }
+    const pet = this._garagePetContainer;
+    const S = 0.72;
+    const f = this._gpFoot(S);
+    const stand = { x: 160, y: 100 - this._gpFoot(1) };
+    const onLid = { x: 30, y: -98 - f };
+    const inBin = { x: 0, y: this._gpPeek(-90, S) };
+    const at = this._gpAt(node, stand.x, stand.y);
+    this._gpWalkTo(at.x, at.y, () => {
+      this._gpEnter(node);
+      this._gpFace(-1);
+      this._gpJump(onLid.x, onLid.y, 60, 460, () => this._gpSquash(() => {
+        // Pop! The lid flips off and leans against the side of the bins.
+        this.tweens.add({ targets: parts.lid, x: -122, y: 6, angle: -78, duration: 420, ease: 'Quad.easeOut' });
+        this._gpHop(1, 22, () => this._gpJump(inBin.x, inBin.y, 50, 380,
+          () => this._gpSquash(() => dig(0)), { onMid: () => this._gpBehind(parts.front) }));
+      }), { scale: S });
+    });
+    const junk = [
+      g => { g.fillStyle(0xd13b3b, 1); g.fillCircle(0, 0, 12); g.fillStyle(0xffffff, 0.5); g.fillCircle(-4, -4, 4); },
+      g => { g.fillStyle(0x4a7ad6, 1); g.fillRoundedRect(-11, -11, 22, 22, 4); },
+      g => { g.fillStyle(0x4ecdc4, 1); g.fillRoundedRect(-7, -18, 14, 26, 5); g.fillRoundedRect(-7, 2, 22, 12, 5); }
+    ];
+    const dig = (k) => {
+      this.tweens.add({ targets: node, angle: k % 2 ? 2.5 : -2.5, duration: 140, yoyo: true });
+      this.tweens.add({
+        targets: pet, y: inBin.y + 14, duration: 140, yoyo: true, ease: 'Sine.easeInOut',
+        onYoyo: () => { if (junk[k]) this._binToss(node, parts, junk[k]); },
+        onComplete: () => {
+          pet.y = inBin.y;
+          if (k < 3) dig(k + 1);
+          else this.time.delayedCall(520, out);
+        }
+      });
+    };
+    // Climb up until its feet clear the rim (still behind the bin's front),
+    // then come out on top and jump down.
+    const out = () => this._gpTo(inBin.x, -90 - f - 2, 240, () => {
+      this._gpInFront();
+      parts.front.setVisible(false);
+      this._gpJump(stand.x, stand.y, 80, 520, () => {
+        this.tweens.add({
+          targets: parts.lid, x: parts.home.x, y: parts.home.y, angle: 0,
+          duration: 360, ease: 'Back.easeOut'
+        });
+        this._gpExit();
+        done();
+      }, { scale: 1 });
+    }, 'Back.easeOut');
+  }
+
+  // One odd thing flung up out of the bin and back in (from behind the front).
+  _binToss(node, parts, draw) {
+    const g = this.add.graphics();
+    draw(g);
+    const x0 = (Math.random() - 0.5) * 70;
+    const dx = (Math.random() - 0.5) * 90;
+    g.setPosition(x0, -70);
+    node.addAt(g, node.getIndex(parts.front));
+    const drv = { p: 0 };
+    this.tweens.add({
+      targets: drv, p: 1, duration: 700, ease: 'Linear',
+      onUpdate: () => {
+        g.x = x0 + dx * drv.p;
+        g.y = -70 - Math.sin(drv.p * Math.PI) * 110;
+        g.angle = drv.p * 300;
+      },
+      onComplete: () => g.destroy()
+    });
+  }
+
+  // Squat rack (940,600): step under the bar, take it on the shoulders, three
+  // slow squats, rack it with a puff of chalk, step out.
+  gpSquats(done) {
+    const node = this._garageNode?.squat;
+    const parts = node?.gParts;
+    if (!parts) { done(); return; }
+    const pet = this._garagePetContainer;
+    const S = 0.82;
+    const f = this._gpFoot(S);
+    const stand = { x: 0, y: 136 - this._gpFoot(1) };
+    const under = { x: 0, y: 110 - f };                   // feet on the base plate
+    // The bar's line sits 19px above the bar piece's origin; rest it just
+    // under the top of the pet's head.
+    const barOn = (110 - 2 * f) + 26;
+    const dip = 0.4 * f;                                  // head drop at the bottom
+    const at = this._gpAt(node, stand.x, stand.y);
+    this._gpWalkTo(at.x, at.y, () => {
+      parts.pause();
+      this._gpEnter(node);
+      this._gpBehind(parts.bar);
+      this._gpJump(under.x, under.y, 24, 300, () => {
+        this.tweens.add({
+          targets: parts.bar, y: barOn, duration: 320, ease: 'Sine.easeInOut',
+          onComplete: () => rep(0)
+        });
+      }, { scale: S });
+    });
+    const rep = (k) => {
+      this.tweens.add({ targets: parts.bar, y: barOn + dip, duration: 460, yoyo: true, ease: 'Sine.easeInOut' });
+      this.tweens.add({
+        targets: pet, scaleY: S * 0.8, scaleX: S * 1.06, y: under.y + f * 0.2,
+        duration: 460, yoyo: true, ease: 'Sine.easeInOut',
+        onComplete: () => {
+          pet.setScale(S);
+          pet.y = under.y;
+          if (k < 2) rep(k + 1);
+          else rack();
+        }
+      });
+    };
+    const rack = () => {
+      this.tweens.add({
+        targets: parts.bar, y: 0, duration: 300, ease: 'Sine.easeOut',
+        onComplete: () => {
+          for (const hx of [-50, 50]) {
+            const c = this._gpAt(node, hx, -22);
+            this._gpPuffs(c.x, c.y, 0xffffff, 4, 24, 26);
+          }
+          this._gpHop(2, 12, () => this._gpJump(stand.x, stand.y, 30, 320, () => {
+            this._gpExit();
+            parts.resume();
+            done();
+          }, { scale: 1 }));
+        }
+      });
+    };
+  }
+
+  // Laptop (215,950): sit at the keyboard and type. Each tap types a line of
+  // "code" onto the screen; when the screen is full it flashes, the code clears
+  // and a little rocket launches up the screen. Game built.
+  gpLaptopType(done) {
+    const node = this._garageNode?.laptop;
+    const parts = node?.gParts;
+    if (!parts) { done(); return; }
+    const pet = this._garagePetContainer;
+    // Left of the laptop, but never off the left edge of the screen (x 215).
+    const seat = { x: Math.max(-150, this._gpHalfW(1) - 205), y: 80 - this._gpFoot(1) };
+    const colors = [0x7ee787, 0x79c0ff, 0xffa657, 0xd2a8ff];
+    const LINES = 8;
+    const at = this._gpAt(node, seat.x, seat.y);
+    this._gpWalkTo(at.x, at.y, () => {
+      this._gpEnter(node);
+      this._gpFace(1);
+      parts.code.clear();
+      parts.code.setAlpha(1);
+      this.tweens.add({ targets: pet, angle: 8, duration: 160, onComplete: () => tap(0, pet.y) });
+    });
+    const tap = (line, y0) => {
+      this.tweens.add({
+        targets: pet, y: y0 + 6, duration: 80, yoyo: true, ease: 'Sine.easeOut',
+        onComplete: () => {
+          // One indented line per tap, top to bottom, on the part of the screen
+          // the pet isn't covering (screen is -90..90 x -78..44).
+          const indent = [0, 12, 24, 12, 0, 12, 24, 0][line];
+          const w = 28 + Math.random() * (100 - indent);
+          parts.code.fillStyle(colors[line % colors.length], 0.9);
+          parts.code.fillRoundedRect(-50 + indent, -68 + line * 13, w, 6, 3);
+          if (line + 1 < LINES) this.time.delayedCall(90, () => tap(line + 1, y0));
+          else this.time.delayedCall(220, () => this._laptopLaunch(node, parts, () => {
+            pet.angle = 0;
+            this._gpHop(2, 12, () => { this._gpExit(); done(); });
+          }));
+        }
+      });
+    };
+  }
+
+  // The finished game: the screen flashes, the code clears and a little rocket
+  // flies up the screen.
+  _laptopLaunch(node, parts, cb) {
+    const flash = this.add.graphics();
+    flash.fillStyle(0xffffff, 1);
+    flash.fillRoundedRect(-90, -78, 180, 122, 3);
+    flash.setBlendMode(Phaser.BlendModes.ADD).setAlpha(0);
+    node.add(flash);
+    this.tweens.add({ targets: flash, alpha: 0.7, duration: 120, yoyo: true, onComplete: () => flash.destroy() });
+    this.tweens.add({ targets: parts.code, alpha: 0, duration: 200, delay: 120, onComplete: () => parts.code.clear() });
+    const rocket = this.add.container(30, 40);
+    const rg = this.add.graphics();
+    drawPrintedToy(rg);
+    rocket.add(rg);
+    rocket.setScale(0.9).setAlpha(0);
+    node.add(rocket);
+    this.tweens.add({ targets: rocket, alpha: 1, duration: 120, delay: 200 });
+    this.tweens.add({
+      targets: rocket, y: -38, duration: 900, delay: 200, ease: 'Quad.easeIn',
+      onComplete: () => this.tweens.add({
+        targets: rocket, alpha: 0, duration: 200,
+        onComplete: () => { rocket.destroy(); cb?.(); }
+      })
+    });
+  }
+
+  // 3D printer (470,950): hop up on top of the printer and watch a print from
+  // above, head following the nozzle back and forth. When the rocket finishes
+  // it cheers, hops down and catches the rocket as it pops off the bed.
+  gpWatchPrint(done) {
+    const node = this._garageNode?.printer;
+    const parts = node?.gParts;
+    if (!parts) { done(); return; }
+    const pet = this._garagePetContainer;
+    const S = 0.8;
+    const stand = { x: -140, y: 95 - this._gpFoot(1) };
+    const perch = { x: 4, y: -84 - this._gpFoot(S) };
+    const PRINT = 3400;
+    const at = this._gpAt(node, stand.x, stand.y);
+    this._gpWalkTo(at.x, at.y, () => {
+      this._gpEnter(node);
+      this._gpFace(1);
+      this._gpJump(perch.x, perch.y, 70, 480, () => this._gpSquash(watch), { scale: S });
+    });
+    const watch = () => {
+      const follow = this.tweens.addCounter({
+        from: 0, to: 1, duration: PRINT,
+        onUpdate: (tw) => {
+          const hx = parts.head.x;                    // -44..44 along the gantry
+          if (Math.abs(hx) > 30) this._gpFace(hx > 0 ? 1 : -1);
+          pet.x = perch.x + hx * 0.25;
+          pet.angle = (hx / 44) * 8;
+          pet.y = perch.y + tw.getValue() * 6;        // leaning in as it grows
+        }
+      });
+      parts.printFor(PRINT, () => {
+        follow.stop();
+        pet.angle = 0;
+        this._gpHop(2, 14, () => {
+          this._gpFace(-1);
+          this._gpJump(stand.x + 30, stand.y, 60, 460, () => {
+            this._gpFace(1);                          // turn back to the printer
+            this._gpSquash();
+            this._gpCatchRocket(node, parts, done);
+          }, { scale: 1 });
+        });
+      });
+    };
+  }
+
+  // The finished rocket pops off the bed into the pet's paws; it holds it up
+  // and hops, then the printer goes back to printing on its own.
+  _gpCatchRocket(node, parts, done) {
+    const from = this._gpAt(node, 0, 24);
+    parts.toy.alpha = 0;
+    const rocket = this.add.container(from.x, from.y).setDepth(12);
+    const rg = this.add.graphics();
+    drawPrintedToy(rg);
+    rocket.add(rg);
+    const to = this._gpWorld();
+    const foot = this._gpFoot();
+    const ox = 8, oy = -foot + 14;                    // held up over its head
+    const drv = { p: 0 };
+    this.tweens.add({
+      targets: drv, p: 1, duration: 440, ease: 'Linear',
+      onUpdate: () => {
+        const p = drv.p;
+        rocket.x = from.x + (to.x + ox - from.x) * p;
+        rocket.y = from.y + (to.y + oy - from.y) * p - Math.sin(p * Math.PI) * 80;
+        rocket.angle = -360 * p;
+      },
+      onComplete: () => {
+        rocket.angle = 0;
+        this._gpHold(rocket, ox, oy);
+        this._gpHop(3, 14, () => {
+          this._gpDrop();
+          this.tweens.add({
+            targets: rocket, alpha: 0, y: rocket.y - 20, duration: 260,
+            onComplete: () => rocket.destroy()
+          });
+          parts.resume();
+          this._gpExit();
+          done();
+        });
+      }
+    });
+  }
+
+  // Stroller (760,950): try to climb into the bassinet. The first go bonks off
+  // the side, the second gets its paws over the rim and slips back, the third
+  // makes it: it snuggles down under the hood and rocks along with the stroller.
+  gpStrollerClimb(done) {
+    const node = this._garageNode?.stroller;
+    const parts = node?.gParts;
+    if (!parts) { done(); return; }
+    const pet = this._garagePetContainer;
+    const S0 = 0.8, S = 0.6;
+    const stand = { x: 180, y: 120 - this._gpFoot(1) };
+    const low = { x: 132, y: 120 - this._gpFoot(S0) };
+    const bonk = { x: 88, y: -26 - this._gpFoot(S0) * 0.2 };
+    const rim = { x: 70, y: -54 - this._gpFoot(S0) * 0.55 };
+    const inside = { x: 26, y: this._gpPeek(-54, S) };
+    const slide = (cb) => this.tweens.add({
+      targets: pet, x: low.x, y: low.y, angle: 10, duration: 380, ease: 'Quad.easeIn',
+      onComplete: () => { pet.angle = 0; this._gpSquash(() => this._gpJitter(2, 5, cb, -8)); }
+    });
+    const at = this._gpAt(node, stand.x, stand.y);
+    this._gpWalkTo(at.x, at.y, () => {
+      this._gpEnter(node);
+      this._gpFace(-1);
+      this._gpJump(bonk.x, bonk.y, 40, 380, () => slide(() => {
+        this._gpJump(rim.x, rim.y, 80, 440, () => this._gpJitter(6, 4, () => slide(() => {
+          this._gpJump(inside.x, inside.y, 130, 560, () => this._gpSquash(() => {
+            // Face out the open front, eyes away from the hood.
+            this._gpFace(1);
+            this._gpSnooze(3, () => {
+              this._gpInFront();
+              parts.front.setVisible(false);
+              this._gpJump(stand.x, stand.y, 90, 520, () => { this._gpExit(); done(); }, { scale: 1 });
+            });
+          }), { scale: S, onMid: () => this._gpBehind(parts.front) });
+        }), 6));
+      }), { scale: S0 });
+    });
+  }
+
+  // Settle in for a nap: slow breaths and a few z's drifting up.
+  _gpSnooze(n, cb) {
+    const pet = this._garagePetContainer;
+    const s = pet.scaleY, y0 = pet.y;
+    let k = 0;
+    const breathe = () => {
+      this._gpEmote('z', '#cfe3ff', 28 + k * 6);
+      this.tweens.add({
+        targets: pet, scaleY: s * 0.92, y: y0 + this._gpFoot(s) * 0.08,
+        duration: 420, yoyo: true, ease: 'Sine.easeInOut',
+        onComplete: () => {
+          pet.setScale(s);
+          pet.y = y0;
+          if (++k < n) breathe();
+          else cb?.();
+        }
+      });
+    };
+    breathe();
+  }
+
+  // Kids' bikes (250,1280): climb onto the orange bike, wobble forward like a
+  // first ride without training wheels, roll back steady, cheer, hop off.
+  gpBikeRide(done) {
+    const node = this._garageNode?.bikes;
+    const parts = node?.gParts;
+    if (!parts) { done(); return; }
+    const pet = this._garagePetContainer;
+    const bike = parts.bike;
+    const S = 0.58;
+    const f = this._gpFoot(S);
+    const standN = { x: -70, y: 100 - this._gpFoot(1) };   // node space, floor in front
+    const seat = { x: 0, y: -54 - f * 0.86 };                // bike space, astride the seat
+    const at = this._gpAt(node, standN.x, standN.y);
+    this._gpWalkTo(at.x, at.y, () => {
+      this._gpEnter(bike);
+      this._gpFace(1);
+      this._gpJump(seat.x, seat.y, 60, 460, () => this._gpSquash(ride), { scale: S });
+    });
+    // Roll the bike to (toX, toY) in node space, wheels turning to match,
+    // wobbling by up to `wobble` degrees while the pet leans against it.
+    const home = { x: bike.x, y: bike.y };
+    const roll = (toX, toY, dur, wobble, cb) => {
+      const x0 = bike.x, y0 = bike.y;
+      const drv = { p: 0 };
+      this.tweens.add({
+        targets: drv, p: 1, duration: dur, ease: 'Sine.easeInOut',
+        onUpdate: () => {
+          const p = drv.p;
+          bike.x = x0 + (toX - x0) * p;
+          bike.y = y0 + (toY - y0) * p;
+          const turn = Phaser.Math.RadToDeg((bike.x - home.x) / 22);   // wheel radius 22
+          parts.wheels.forEach(w => { w.angle = turn; });
+          const wob = Math.sin(p * Math.PI * 5) * wobble * Math.sin(p * Math.PI);
+          bike.angle = wob;
+          pet.angle = -wob * 1.6;
+        },
+        onComplete: () => { bike.angle = 0; pet.angle = 0; cb?.(); }
+      });
+    };
+    // Out onto the open floor in front of the row (so it passes in front of the
+    // pink bike, not through it), then back into its spot.
+    const ride = () => roll(home.x + 70, home.y + 36, 1300, 5, () => this.time.delayedCall(220, () => {
+      roll(home.x, home.y, 900, 0, () => this._gpHop(2, 10, () => {
+        this._gpEmote('♥');
+        this._gpJump(standN.x, standN.y - bike.y, 60, 460, () => { this._gpExit(); done(); }, { scale: 1 });
+      }));
+    }));
+  }
+
+  // Ebike (760,1280): hop up into the orange kid seat on the back rack, wiggle
+  // in behind the harness bar, flash the headlight twice, bounce, hop down.
+  gpEbikeSeat(done) {
+    const node = this._garageNode?.ebike;
+    const parts = node?.gParts;
+    if (!parts) { done(); return; }
+    const pet = this._garagePetContainer;
+    const S = 0.62;
+    const stand = { x: -215, y: 100 - this._gpFoot(1) };
+    const seat = { x: -104, y: -38 - this._gpFoot(S) };     // bottom tucked into the cushion
+    const at = this._gpAt(node, stand.x, stand.y);
+    this._gpWalkTo(at.x, at.y, () => {
+      this._gpEnter(node);
+      this._gpFace(1);
+      this._gpJump(seat.x, seat.y, 70, 480, () => this._gpSquash(() => {
+        this.tweens.add({
+          targets: pet, angle: { from: -6, to: 6 }, duration: 120, yoyo: true, repeat: 1,
+          onComplete: () => {
+            pet.angle = 0;
+            this._ebikeFlash(node, () => this._gpHop(3, 8, () => this.time.delayedCall(450, () => {
+              this._gpInFront();
+              parts.front.setVisible(false);
+              this._gpJump(stand.x, stand.y, 60, 480, () => { this._gpExit(); done(); }, { scale: 1 });
+            })));
+          }
+        });
+      }), { scale: S, onMid: () => this._gpBehind(parts.front) });
+    });
+  }
+
+  // Two bright flashes of the ebike headlight (108,-10): a cone up the road.
+  _ebikeFlash(node, cb) {
+    const beam = this.add.graphics();
+    beam.fillStyle(0xfff3a0, 0.5);
+    beam.fillTriangle(112, -10, 260, -58, 260, 38);
+    beam.fillStyle(0xffffff, 0.95);
+    beam.fillCircle(108, -10, 9);
+    beam.setBlendMode(Phaser.BlendModes.ADD).setAlpha(0);
+    node.add(beam);
+    this.tweens.add({
+      targets: beam, alpha: 1, duration: 110, hold: 80, yoyo: true, repeat: 1,
+      onComplete: () => { beam.destroy(); cb?.(); }
+    });
+  }
+
+  // Running shoes (540,1560): hop into the teal runner, which hops off the rack
+  // and zooms across the floor and back, kicking up dust, then hops home.
+  gpShoeZoom(done) {
+    const node = this._garageNode?.shoes;
+    const parts = node?.gParts;
+    if (!parts) { done(); return; }
+    const shoe = parts.shoe;
+    const S = 0.55;
+    const f = this._gpFoot(S);
+    const standN = { x: -40, y: 150 - this._gpFoot(1) };   // node space, floor below the rack
+    const inShoe = { x: -14, y: this._gpPeek(-32, S) };      // shoe space, down in the opening
+    const floorY = 110;                                      // node space: open floor under the rack
+    const at = this._gpAt(node, standN.x, standN.y);
+    this._gpWalkTo(at.x, at.y, () => {
+      this._gpEnter(shoe);
+      this._gpFace(1);
+      this._gpJump(inShoe.x, inShoe.y, 70, 460, () => this._gpSquash(go),
+        { scale: S, onMid: () => this._gpBehind(parts.body) });
+    });
+    const hop = (toY, cb) => {
+      const y0 = shoe.y;
+      const drv = { p: 0 };
+      this.tweens.add({
+        targets: drv, p: 1, duration: 360, ease: 'Linear',
+        onUpdate: () => { shoe.y = y0 + (toY - y0) * drv.p - Math.sin(drv.p * Math.PI) * 40; },
+        onComplete: () => { shoe.y = toY; cb?.(); }
+      });
+    };
+    const zoom = (toX, dur, cb) => {
+      const dust = this.time.addEvent({
+        delay: 70, loop: true,
+        callback: () => {
+          const h = this._gpAt(shoe, -80, 22);             // the heel, whichever way it faces
+          this._gpPuffs(h.x, h.y, 0xbdb6c4, 2, 16, 18);
+        }
+      });
+      this.tweens.add({
+        targets: shoe, x: toX, duration: dur, ease: 'Sine.easeInOut',
+        onComplete: () => { dust.remove(false); cb?.(); }
+      });
+    };
+    const turn = (cb) => this.tweens.add({
+      targets: shoe, scaleX: -shoe.scaleX, duration: 160, ease: 'Sine.easeInOut', onComplete: cb
+    });
+    const go = () => this.tweens.add({
+      targets: shoe, angle: { from: -6, to: 6 }, duration: 110, yoyo: true, repeat: 1,
+      onComplete: () => {
+        shoe.angle = 0;
+        hop(floorY, () => zoom(360, 560, () => turn(() => zoom(-360, 900, () => turn(() =>
+          zoom(0, 560, () => hop(parts.home.y, () => {
+            this._gpInFront();
+            this._gpJump(standN.x - shoe.x, standN.y - shoe.y, 70, 460, () => { this._gpExit(); done(); }, { scale: 1 });
+          })))))));
+      }
+    });
+  }
+
+  // A red, white and blue ice pop in three bites (top, middle, bottom) on a
+  // stick. Three bands so it reads against any pet's colors.
+  _gpIcePop() {
+    const pop = this.add.container(0, 0).setDepth(12);
+    const stick = this.add.graphics();
+    stick.fillStyle(0xd9b382, 1);
+    stick.fillRoundedRect(-3, 8, 6, 20, 2);
+    pop.add(stick);
+    const slices = [
+      [-26, 13, { tl: 9, tr: 9, bl: 0, br: 0 }, 0xff4d5e],
+      [-13, 13, 0, 0xfff5e6],
+      [0, 12, { tl: 0, tr: 0, bl: 4, br: 4 }, 0x4d8bff]
+    ];
+    pop.bites = slices.map(([y, h, r, color]) => {
+      const g = this.add.graphics();
+      g.fillStyle(color, 1);
+      if (r) g.fillRoundedRect(-11, y, 22, h, r);
+      else g.fillRect(-11, y, 22, h);
+      g.fillStyle(0xffffff, 0.35);
+      g.fillRect(-7, y + 2, 3, h - 4);
+      pop.add(g);
+      return g;
+    });
+    return pop;
+  }
+
+  // Eat a held treat in chomps, one bite piece per chomp, then a happy hop.
+  _gpEat(treat, done) {
+    let bite = 0;
+    const chomp = () => this._gpSquash(() => {
+      treat.bites[bite]?.setVisible(false);
+      bite++;
+      if (bite < treat.bites.length) { this.time.delayedCall(170, chomp); return; }
+      this._gpDrop();
+      this.tweens.add({
+        targets: treat, alpha: 0, y: treat.y + 20, duration: 300,
+        onComplete: () => { treat.destroy(); this._gpHop(2, 12, done); }
+      });
+    }, 0.12);
+    chomp();
   }
 
   // ----------------------------------------------------------
   // GARAGE IDLE ANIMATIONS — small bits of life on each object.
-  // Routed by item id; objects with no entry just keep breathing.
+  // Routed by item id. Each one also hangs the pieces the pet plays with on
+  // node.gParts (a lid, the chip bag, a bike, a front piece to hide behind).
+  // Front pieces are redraws of an object's near side, hidden until the pet is
+  // inside that object, so they never double up the art.
   // ----------------------------------------------------------
   animateGarageItem(id, node) {
     switch (id) {
       case 'freezer':  return this._freezerLidOpen(node);
+      case 'rack':     return this._rackChipBag(node);
+      case 'bins':     return this._binsLid(node);
       case 'printer':  return this._printerPrinting(node);
       case 'laptop':   return this._laptopGlow(node);
       case 'stroller': return this._strollerRock(node);
+      case 'bikes':    return this._bikesOrange(node);
       case 'ebike':    return this._ebikeCharging(node);
       case 'squat':    return this._squatRackReps(node);
+      case 'shoes':    return this._shoesTeal(node);
     }
+  }
+
+  // A hidden copy of part of an object, drawn over the pet while it's inside.
+  _garageFront(node, draw) {
+    const front = this.add.graphics();
+    draw(front);
+    front.setVisible(false);
+    node.add(front);
+    return front;
   }
 
   // Freezer: the lid cracks open every few seconds, a cold glow spills out and
   // a little frost mist drifts up, then it settles closed again.
+  //
+  // The loop runs on a generation token so the pet can take the lid: pause()
+  // bumps the token and stops the lid (the old loop quietly dies at its next
+  // step), resume() starts a fresh loop.
   _freezerLidOpen(node) {
     // Cold interior glow — sits at the rim, hidden under the closed lid.
     const glow = this.add.graphics();
@@ -593,22 +1609,40 @@ export class HiddenWorldScene extends Phaser.Scene {
     lid.add(lg);
     node.add(lid);
 
-    const close = () => {
+    // The front piece repeats the strip of cold glow that spills over the rim
+    // (it's only shown while the lid is open), so the glow doesn't shrink when
+    // the pet drops in behind it.
+    const front = this._garageFront(node, g => {
+      drawFreezerBody(g);
+      g.fillStyle(0xbfe9f5, 1);
+      g.fillRoundedRect(-104, -20, 208, 12, { tl: 0, tr: 0, bl: 7, br: 7 });
+    });
+
+    let gen = 0;
+    const close = (g) => {
+      if (g !== gen || !node.active) return;
       this.tweens.add({ targets: glow, alpha: 0, duration: 380, ease: 'Sine.easeIn' });
       this.tweens.add({
         targets: lid, y: 0, angle: 0, duration: 560, ease: 'Quad.easeIn',
-        onComplete: () => this.time.delayedCall(3200 + Math.random() * 2600, open)
+        onComplete: () => this.time.delayedCall(3200 + Math.random() * 2600, () => open(g))
       });
     };
-    const open = () => {
-      if (!node.active) return;
+    const open = (g) => {
+      if (g !== gen || !node.active) return;
       this.tweens.add({ targets: glow, alpha: 1, duration: 460, ease: 'Sine.easeOut' });
       this.tweens.add({
         targets: lid, y: -24, angle: -9, duration: 640, ease: 'Back.easeOut',
-        onComplete: () => { this._freezerFrost(node); this.time.delayedCall(1300, close); }
+        onComplete: () => { this._freezerFrost(node); this.time.delayedCall(1300, () => close(g)); }
       });
     };
-    this.time.delayedCall(1400 + Math.random() * 2200, open);
+    node.gParts = {
+      lid, glow, front,
+      pause: () => { gen++; this.tweens.killTweensOf([lid, glow]); },
+      resume: () => { const g = ++gen; this.time.delayedCall(2600 + Math.random() * 2400, () => open(g)); }
+    };
+    // open(0), not open(gen): the arrow would read gen when it FIRES, so a
+    // pause() before then couldn't stop this first cycle.
+    this.time.delayedCall(1400 + Math.random() * 2200, () => open(0));
   }
 
   // A few soft frost puffs rising out of the open freezer.
@@ -633,8 +1667,35 @@ export class HiddenWorldScene extends Phaser.Scene {
     }
   }
 
+  // Pantry rack: the chip bag on the top shelf, loose so the pet can take it.
+  _rackChipBag(node) {
+    const home = { x: -78, y: -165 };
+    const bag = this.add.container(home.x, home.y);
+    const bg = this.add.graphics();
+    drawChipBag(bg);
+    bag.add(bg);
+    node.add(bag);
+    node.gParts = { bag, home };
+  }
+
+  // Storage bins: the top lid (loose, so it can be popped off) and the top bin
+  // body as a front piece to dig behind.
+  _binsLid(node) {
+    const home = { x: 0, y: -90 };
+    const lid = this.add.container(home.x, home.y);
+    const lg = this.add.graphics();
+    drawBinLid(lg);
+    lid.add(lg);
+    node.add(lid);
+    node.gParts = { lid, home, front: this._garageFront(node, drawTopBin) };
+  }
+
   // 3D printer: the print head sweeps along the gantry while a little toy
   // slowly prints up off the bed, then ejects and starts over.
+  //
+  // Same generation token as the freezer: printFor() restarts a quick print
+  // for the pet to watch and calls back with the rocket finished on the bed
+  // (the idle loop stays parked until resume()).
   _printerPrinting(node) {
     const head = this.add.container(0, -44);
     const hg = this.add.graphics();
@@ -653,24 +1714,41 @@ export class HiddenWorldScene extends Phaser.Scene {
     toy.add(tg);
     toy.scaleY = 0;
     node.add(toy);
-    const grow = () => {
-      if (!node.active) return;
+    let gen = 0;
+    const grow = (g, dur = 5200, onDone = null) => {
+      if (g !== gen || !node.active) return;
       toy.scaleY = 0;
       toy.alpha = 1;
       this.tweens.add({
-        targets: toy, scaleY: 1, duration: 5200, ease: 'Linear',
-        onComplete: () => this.time.delayedCall(1400, () => {
-          this.tweens.add({
-            targets: toy, alpha: 0, duration: 420,
-            onComplete: () => this.time.delayedCall(700, grow)
+        targets: toy, scaleY: 1, duration: dur, ease: 'Linear',
+        onComplete: () => {
+          if (g !== gen) return;
+          if (onDone) { onDone(); return; }
+          this.time.delayedCall(1400, () => {
+            if (g !== gen) return;
+            this.tweens.add({
+              targets: toy, alpha: 0, duration: 420,
+              onComplete: () => this.time.delayedCall(700, () => grow(g))
+            });
           });
-        })
+        }
       });
     };
-    grow();
+    node.gParts = {
+      head, toy,
+      printFor: (ms, onDone) => { const g = ++gen; this.tweens.killTweensOf(toy); grow(g, ms, onDone); },
+      resume: () => {
+        const g = ++gen;
+        this.tweens.killTweensOf(toy);
+        toy.scaleY = 0;
+        this.time.delayedCall(900, () => grow(g));
+      }
+    };
+    grow(gen);
   }
 
-  // Laptop: the screen breathes a soft glow — Dad's game, still running.
+  // Laptop: the screen breathes a soft glow, Dad's game still running. The
+  // empty `code` layer is where the pet types when it sits down.
   _laptopGlow(node) {
     const glow = this.add.graphics();
     glow.fillStyle(0x6fa8ff, 1);
@@ -682,6 +1760,9 @@ export class HiddenWorldScene extends Phaser.Scene {
       targets: glow, alpha: { from: 0.10, to: 0.32 },
       duration: 1900, yoyo: true, repeat: -1, ease: 'Sine.easeInOut'
     });
+    const code = this.add.graphics();
+    node.add(code);
+    node.gParts = { code };
   }
 
   // Stroller: a gentle rock, like soothing a baby. (Pivots near the wheels.)
@@ -690,6 +1771,26 @@ export class HiddenWorldScene extends Phaser.Scene {
       targets: node, angle: { from: -2.4, to: 2.4 },
       duration: 1700, yoyo: true, repeat: -1, ease: 'Sine.easeInOut'
     });
+    node.gParts = { front: this._garageFront(node, drawStrollerBassinet) };
+  }
+
+  // Kids' bikes: the orange middle bike as its own piece so the pet can ride
+  // it. Its origin is on the ground between the wheels, and each wheel is its
+  // own graphic so it can turn as the bike rolls.
+  _bikesOrange(node) {
+    const bike = this.add.container(0, 62);
+    const wheels = [-32, 32].map(wx => {
+      const w = this.add.graphics();
+      drawBikeWheel(w, 0, 0, 1);
+      w.setPosition(wx, -22);
+      bike.add(w);
+      return w;
+    });
+    const frame = this.add.graphics();
+    drawBikeFrame(frame, 0, -22, 0xff6b3d, 1);
+    bike.add(frame);
+    node.add(bike);
+    node.gParts = { bike, wheels };
   }
 
   // Ebike: the battery LEDs sweep up like it's charging + the headlight twinkles.
@@ -724,19 +1825,41 @@ export class HiddenWorldScene extends Phaser.Scene {
       targets: hl, alpha: { from: 0.16, to: 0.6 },
       duration: 1400, yoyo: true, repeat: -1, ease: 'Sine.easeInOut'
     });
+    node.gParts = { front: this._garageFront(node, drawEbikeSeatFront) };
   }
 
   // Squat rack: the loaded barbell does slow, steady reps on the J-hooks.
+  // pause()/resume() park it so the pet can take the bar for its own set.
   _squatRackReps(node) {
     const bar = this.add.container(0, 0);
     const bg = this.add.graphics();
     drawSquatBar(bg);
     bar.add(bg);
     node.add(bar);
-    this.tweens.add({
+    const reps = () => this.tweens.add({
       targets: bar, y: { from: 0, to: 16 },
       duration: 1500, yoyo: true, repeat: -1, ease: 'Sine.easeInOut'
     });
+    reps();
+    node.gParts = {
+      bar,
+      pause: () => this.tweens.killTweensOf(bar),
+      resume: () => {
+        this.tweens.killTweensOf(bar);
+        this.tweens.add({ targets: bar, y: 0, duration: 300, ease: 'Sine.easeOut', onComplete: reps });
+      }
+    };
+  }
+
+  // Shoe rack: the teal middle runner as its own piece so the pet can ride it.
+  _shoesTeal(node) {
+    const home = { x: 0, y: 14 };
+    const shoe = this.add.container(home.x, home.y);
+    const sg = this.add.graphics();
+    drawCuteShoe(sg, 0, 0, 0xfff5e6, 0x4ecdc4);
+    shoe.add(sg);
+    node.add(shoe);
+    node.gParts = { shoe, body: sg, home };
   }
 
   // ============================================================
@@ -3471,6 +4594,12 @@ function drawChestFreezer(g) {
   // Ground shadow
   g.fillStyle(0x000000, 0.45);
   g.fillEllipse(0, 90, 250, 18);
+  drawFreezerBody(g);
+}
+
+// Freezer body without its ground shadow. Also redrawn as the front piece the
+// pet sinks behind when it climbs in (see _freezerLidOpen).
+function drawFreezerBody(g) {
   // Body (lower box)
   g.fillStyle(0xeae6db, 1);
   g.fillRoundedRect(-115, -20, 230, 110, 8);
@@ -3530,21 +4659,8 @@ function drawStorageRack(g) {
     g.lineStyle(1, 0x444450, 1);
     for (let x = -100; x < 100; x += 14) g.lineBetween(x, y, x, y + 6);
   }
-  // Top shelf: SNACKS — chip bag, cookie box, cracker box, granola bar box
-  // Chip bag (orange mylar with crimp top)
-  g.fillStyle(0xff8a3d, 1);
-  g.fillRoundedRect(-100, -140 - 50, 44, 50, 4);
-  g.fillStyle(0xc25a20, 1);
-  g.fillRect(-100, -140 - 50, 44, 5);
-  g.fillRect(-100, -140 - 8, 44, 5);
-  // Chip oval label
-  g.fillStyle(0xfff5d8, 1);
-  g.fillEllipse(-78, -140 - 25, 28, 14);
-  g.fillStyle(0xd13b3b, 1);
-  g.fillRect(-90, -140 - 28, 24, 4);
-  // Tiny chip visual
-  g.fillStyle(0xfbd087, 1);
-  g.fillTriangle(-82, -140 - 20, -74, -140 - 20, -78, -140 - 14);
+  // Top shelf: SNACKS (chip bag, cookie box, cracker box, granola bar box).
+  // The chip bag is its own piece (drawChipBag) so the pet can pull it down.
   // Cookie box (blue with cookie circle)
   g.fillStyle(0x4a7ad6, 1);
   g.fillRoundedRect(-50, -140 - 44, 40, 44, 3);
@@ -3617,6 +4733,24 @@ function drawStorageRack(g) {
   g.fillRoundedRect(-10, 100 - 44, 70, 44, 4);
 }
 
+// Chip bag (orange mylar with crimp top), centered on its own origin. It sits
+// on the rack's top shelf at (-78, -165) until the pet takes it.
+function drawChipBag(g) {
+  g.fillStyle(0xff8a3d, 1);
+  g.fillRoundedRect(-22, -25, 44, 50, 4);
+  g.fillStyle(0xc25a20, 1);
+  g.fillRect(-22, -25, 44, 5);
+  g.fillRect(-22, 17, 44, 5);
+  // Chip oval label
+  g.fillStyle(0xfff5d8, 1);
+  g.fillEllipse(0, 0, 28, 14);
+  g.fillStyle(0xd13b3b, 1);
+  g.fillRect(-12, -3, 24, 4);
+  // Tiny chip visual
+  g.fillStyle(0xfbd087, 1);
+  g.fillTriangle(-4, 5, 4, 5, 0, 11);
+}
+
 // 3. Black storage bins with yellow lids — stacked 2-high.
 function drawStorageBins(g) {
   g.fillStyle(0x000000, 0.5);
@@ -3632,18 +4766,26 @@ function drawStorageBins(g) {
   // Bottom bin handle/label
   g.fillStyle(0x3a3a44, 1);
   g.fillRoundedRect(-30, 40, 60, 24, 4);
-  // Top bin
+  // Top bin. Its lid is its own piece (drawBinLid) so the pet can pop it off.
+  drawTopBin(g);
+}
+
+// Top storage bin body. Also redrawn as the front piece the pet digs behind.
+function drawTopBin(g) {
   g.fillStyle(0x1a1a1f, 1);
   g.fillRoundedRect(-90, -90, 180, 80, 8);
-  // Top bin lid
+}
+
+// Top bin's yellow lid, centered on its own origin; it sits at (0, -90).
+function drawBinLid(g) {
   g.fillStyle(0xffd84a, 1);
-  g.fillRoundedRect(-94, -98, 188, 16, 6);
+  g.fillRoundedRect(-94, -8, 188, 16, 6);
   g.fillStyle(0xc9a830, 1);
-  g.fillRect(-94, -84, 188, 4);
+  g.fillRect(-94, 6, 188, 4);
   // Lid latches
   g.fillStyle(0x1a1a1f, 1);
-  g.fillRect(-80, -96, 10, 10);
-  g.fillRect(70, -96, 10, 10);
+  g.fillRect(-80, -6, 10, 10);
+  g.fillRect(70, -6, 10, 10);
 }
 
 // 4. Black squat rack — uprights + barbell + plates + safeties.
@@ -3834,6 +4976,44 @@ function drawUppababyVista(g) {
   g.lineBetween(-75, -94, -45, -94);
   g.lineBetween(-75, -90, -45, -90);
 
+  drawStrollerBassinet(g);
+
+  // WHEELS: big rear, smaller front, with chrome rims
+  // Rear wheel
+  g.fillStyle(0x14141a, 1);
+  g.fillCircle(-100, 100, 28);
+  g.lineStyle(2, 0x3a3a44, 1);
+  g.strokeCircle(-100, 100, 28);
+  // Chrome rim ring
+  g.fillStyle(0xcdcdd4, 1);
+  g.fillCircle(-100, 100, 11);
+  g.fillStyle(0x14141a, 1);
+  g.fillCircle(-100, 100, 3.5);
+  // Spokes (chrome)
+  g.lineStyle(2, 0xcdcdd4, 0.95);
+  for (let i = 0; i < 5; i++) {
+    const a = (i / 5) * Math.PI * 2;
+    g.lineBetween(-100, 100, -100 + Math.cos(a) * 24, 100 + Math.sin(a) * 24);
+  }
+  // Front wheel
+  g.fillStyle(0x14141a, 1);
+  g.fillCircle(90, 95, 22);
+  g.lineStyle(2, 0x3a3a44, 1);
+  g.strokeCircle(90, 95, 22);
+  g.fillStyle(0xcdcdd4, 1);
+  g.fillCircle(90, 95, 9);
+  g.fillStyle(0x14141a, 1);
+  g.fillCircle(90, 95, 3);
+  g.lineStyle(2, 0xcdcdd4, 0.95);
+  for (let i = 0; i < 5; i++) {
+    const a = (i / 5) * Math.PI * 2;
+    g.lineBetween(90, 95, 90 + Math.cos(a) * 18, 95 + Math.sin(a) * 18);
+  }
+}
+
+// Stroller bassinet + hood. Also redrawn as the front piece the pet snuggles
+// down behind (see _strollerRock), so only its head shows over the rim.
+function drawStrollerBassinet(g) {
   // BASSINET — tan curved pod with leather accent strip
   // Body
   g.fillStyle(0xb88f5c, 1);
@@ -3876,65 +5056,42 @@ function drawUppababyVista(g) {
   g.fillRoundedRect(-40, -94, 20, 7, 2);
   g.lineStyle(1, 0x8a9aa6, 0.5);
   g.lineBetween(-38, -91, -22, -91);
-
-  // WHEELS — big rear, smaller front, with chrome rims
-  // Rear wheel
-  g.fillStyle(0x14141a, 1);
-  g.fillCircle(-100, 100, 28);
-  g.lineStyle(2, 0x3a3a44, 1);
-  g.strokeCircle(-100, 100, 28);
-  // Chrome rim ring
-  g.fillStyle(0xcdcdd4, 1);
-  g.fillCircle(-100, 100, 11);
-  g.fillStyle(0x14141a, 1);
-  g.fillCircle(-100, 100, 3.5);
-  // Spokes (chrome)
-  g.lineStyle(2, 0xcdcdd4, 0.95);
-  for (let i = 0; i < 5; i++) {
-    const a = (i / 5) * Math.PI * 2;
-    g.lineBetween(-100, 100, -100 + Math.cos(a) * 24, 100 + Math.sin(a) * 24);
-  }
-  // Front wheel
-  g.fillStyle(0x14141a, 1);
-  g.fillCircle(90, 95, 22);
-  g.lineStyle(2, 0x3a3a44, 1);
-  g.strokeCircle(90, 95, 22);
-  g.fillStyle(0xcdcdd4, 1);
-  g.fillCircle(90, 95, 9);
-  g.fillStyle(0x14141a, 1);
-  g.fillCircle(90, 95, 3);
-  g.lineStyle(2, 0xcdcdd4, 0.95);
-  for (let i = 0; i < 5; i++) {
-    const a = (i / 5) * Math.PI * 2;
-    g.lineBetween(90, 95, 90 + Math.cos(a) * 18, 95 + Math.sin(a) * 18);
-  }
 }
 
 // 8. Three kids' bicycles, scaled and tilted slightly.
+// The orange middle bike (0, 40) is drawn separately by _bikesOrange so the pet
+// can ride it.
 function drawKidsBikes(g) {
   g.fillStyle(0x000000, 0.4);
   g.fillEllipse(0, 100, 320, 14);
   drawSmallBike(g, -120, 30, 0x4ecdc4, 0.85);
-  drawSmallBike(g, 0, 40, 0xff6b3d, 1.0);
   drawSmallBike(g, 130, 50, 0xf0abfc, 1.15);
 }
 
 function drawSmallBike(g, ox, oy, color, scale) {
   const s = scale;
-  // Wheels
+  drawBikeWheel(g, ox - 32 * s, oy, s);
+  drawBikeWheel(g, ox + 32 * s, oy, s);
+  drawBikeFrame(g, ox, oy, color, s);
+}
+
+// One kid's-bike wheel: tire, hub and spokes, centered on (ox, oy).
+function drawBikeWheel(g, ox, oy, s) {
   g.fillStyle(0x14141a, 1);
-  g.fillCircle(ox - 32 * s, oy, 22 * s);
-  g.fillCircle(ox + 32 * s, oy, 22 * s);
+  g.fillCircle(ox, oy, 22 * s);
   g.fillStyle(0x6a6a76, 1);
-  g.fillCircle(ox - 32 * s, oy, 6 * s);
-  g.fillCircle(ox + 32 * s, oy, 6 * s);
+  g.fillCircle(ox, oy, 6 * s);
   // Spokes (cheap radial)
   g.lineStyle(1, 0x9a9aaa, 0.9);
   for (let i = 0; i < 6; i++) {
     const ang = (i / 6) * Math.PI * 2;
-    g.lineBetween(ox - 32 * s, oy, ox - 32 * s + Math.cos(ang) * 18 * s, oy + Math.sin(ang) * 18 * s);
-    g.lineBetween(ox + 32 * s, oy, ox + 32 * s + Math.cos(ang) * 18 * s, oy + Math.sin(ang) * 18 * s);
+    g.lineBetween(ox, oy, ox + Math.cos(ang) * 18 * s, oy + Math.sin(ang) * 18 * s);
   }
+}
+
+// Kid's-bike frame, seat and bars; (ox, oy) is the midpoint between the hubs.
+function drawBikeFrame(g, ox, oy, color, scale) {
+  const s = scale;
   // Frame — triangle + seat post
   g.lineStyle(6 * s, color, 1);
   g.lineBetween(ox - 32 * s, oy, ox, oy - 26 * s);
@@ -4057,6 +5214,27 @@ function drawRadPower(g) {
   g.fillRoundedRect(-92, -10, 14, 5, 2);
 }
 
+// The parts of the ebike's orange seat that sit in front of a rider: the lower
+// half of the cushion, both side bolsters and the harness bar with its buckle.
+// Redrawn over the pet while it rides (see _ebikeCharging); matches drawRadPower.
+function drawEbikeSeatFront(g) {
+  g.fillStyle(0xff8a3d, 1);
+  g.fillRoundedRect(-150, -42, 84, 14, { tl: 0, tr: 0, bl: 9, br: 9 });
+  g.fillStyle(0x000000, 0.22);
+  g.fillRoundedRect(-148, -32, 80, 4, 2);
+  g.fillStyle(0xff7020, 1);
+  g.fillRoundedRect(-148, -50, 10, 22, 4);
+  g.fillRoundedRect(-78, -50, 10, 22, 4);
+  g.lineStyle(4, 0x14141a, 1);
+  g.lineBetween(-150, -42, -138, -60);
+  g.lineBetween(-138, -60, -82, -60);
+  g.lineBetween(-82, -60, -70, -42);
+  g.fillStyle(0xfbbf24, 1);
+  g.fillRoundedRect(-115, -64, 16, 9, 2);
+  g.fillStyle(0x14141a, 1);
+  g.fillCircle(-107, -59, 2);
+}
+
 // 10. Shoe rack with three chunky cute runners side-by-side.
 function drawShoeRack(g) {
   g.fillStyle(0x000000, 0.4);
@@ -4066,9 +5244,9 @@ function drawShoeRack(g) {
   g.fillRoundedRect(-340, 38, 680, 18, 4);
   g.fillStyle(0x2a2218, 1);
   g.fillRect(-340, 52, 680, 4);
-  // Three runners — cream upper with different accent pops
+  // Three runners: cream upper with different accent pops. The teal middle
+  // one (0, 14) is drawn separately by _shoesTeal so the pet can ride it.
   drawCuteShoe(g, -210, 14, 0xfff5e6, 0xff66aa); // pink
-  drawCuteShoe(g, 0, 14, 0xfff5e6, 0x4ecdc4);    // teal
   drawCuteShoe(g, 210, 14, 0xfff5e6, 0xff8a3d);  // orange
 }
 
