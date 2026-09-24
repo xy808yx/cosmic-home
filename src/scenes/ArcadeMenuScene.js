@@ -8,7 +8,7 @@ import { audio } from '../AudioManager.js';
 import { music } from '../MusicManager.js';
 import { TransitionManager } from '../TransitionManager.js';
 import { createStarfield } from '../starfieldHelper.js';
-import { style } from '../textStyles.js';
+import { style, TYPE } from '../textStyles.js';
 import { COLORS } from '../colorPalette.js';
 import { createButton } from '../buttonHelper.js';
 
@@ -31,8 +31,7 @@ export class ArcadeMenuScene extends Phaser.Scene {
       stroke: '#0a0a1a',
       strokeThickness: 5
     })).setOrigin(0.5);
-    this.add.text(W / 2, 310, 'Pick a mode, pilot.', style('caption', {
-      fontSize: '30px',
+    this.add.text(W / 2, 315, 'Pick a mode, pilot.', style('body', {
       fill: '#cfcfe0'
     })).setOrigin(0.5);
 
@@ -40,7 +39,7 @@ export class ArcadeMenuScene extends Phaser.Scene {
     const bestRush = progress.arcade?.bossRushBest;
 
     const cy0 = 900;
-    const gap = 280;
+    const gap = 340;
 
     this.makeModeCard(W / 2, cy0, {
       title: 'ENDLESS',
@@ -65,7 +64,7 @@ export class ArcadeMenuScene extends Phaser.Scene {
       x: 130, y: 100, label: '← MAP',
       width: 220, height: 76,
       color: COLORS.bgPanel,
-      textOverrides: { fontSize: '24px', fill: '#fbbf24', fontStyle: '900' },
+      textOverrides: { fontSize: `${TYPE.button}px`, fill: '#fbbf24', fontStyle: '900' },
       onClick: () => new TransitionManager(this).fadeToScene('WorldMapScene')
     });
 
@@ -73,8 +72,9 @@ export class ArcadeMenuScene extends Phaser.Scene {
   }
 
   makeModeCard(x, y, opts) {
+    // Tall enough for a 52px title, a 42px line and a 36px stat line.
     const cw = 820;
-    const ch = 220;
+    const ch = 280;
     const c = this.add.container(x, y);
     const bg = this.add.graphics();
     bg.fillStyle(COLORS.bgPanel, 0.95);
@@ -83,18 +83,18 @@ export class ArcadeMenuScene extends Phaser.Scene {
     bg.strokeRoundedRect(-cw / 2, -ch / 2, cw, ch, 28);
     c.add(bg);
 
-    c.add(this.add.text(-cw / 2 + 40, -50, opts.title, style('display', {
-      fontSize: '54px',
+    c.add(this.add.text(-cw / 2 + 40, -66, opts.title, style('display', {
+      fontSize: `${TYPE.heading}px`,
       fill: '#ffffff'
     })).setOrigin(0, 0.5));
 
-    c.add(this.add.text(-cw / 2 + 40, 14, opts.subtitle, style('subhead', {
-      fontSize: '28px',
+    c.add(this.add.text(-cw / 2 + 40, 6, opts.subtitle, style('subhead', {
+      fontSize: `${TYPE.body}px`,
       fill: '#' + opts.accent.toString(16).padStart(6, '0')
     })).setOrigin(0, 0.5));
 
-    c.add(this.add.text(-cw / 2 + 40, 60, opts.detail, style('caption', {
-      fontSize: '22px',
+    c.add(this.add.text(-cw / 2 + 40, 72, opts.detail, style('caption', {
+      fontSize: `${TYPE.label}px`,
       fill: '#cfcfe0'
     })).setOrigin(0, 0.5));
 

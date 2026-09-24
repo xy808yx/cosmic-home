@@ -1,5 +1,5 @@
 // Full-screen tabbed shop. Tabs: Style (pet hats+accessories), Auras, Engine
-// Trails, Paint, Ship Parts. Each tab renders a 3-column grid of item cards
+// Trails, Paint, Ship Parts. Each tab renders a 2-column grid of item cards
 // with live preview.
 
 import Phaser from 'phaser';
@@ -25,6 +25,8 @@ import { createModal } from '../modalHelper.js';
 
 const W = 1080;
 const H = 1920;
+// A shop row is never shorter than this, even when its cards need less.
+const CARD_MIN_H = 380;
 
 const TABS = [
   { id: 'style',   label: 'TOYS',   accent: 0xffd86b, kind: 'pet' },
@@ -111,10 +113,12 @@ export class ShopScene extends Phaser.Scene {
 
   // Side-by-side preview of currently-equipped pet and ship, top-right.
   // Separate badges so the player can clearly read each layer of cosmetics
-  // they have equipped — no need to squint at the porthole.
+  // they have equipped: no need to squint at the porthole.
   createPlayerAvatar() {
     const radius = 65;
-    const cy = 130;
+    // Sits high enough that the PET / SHIP captions clear the badge halo and
+    // still end above the tab strip at y=240.
+    const cy = 112;
     const petCx = W - 230;
     const shipCx = W - 90;
 
@@ -150,9 +154,9 @@ export class ShopScene extends Phaser.Scene {
     container.preview = preview;
     container.accent = accent;
 
-    // Caption strip just below the badge
-    container.add(this.add.text(0, radius + 18, label, style('caption', {
-      fontSize: '20px',
+    // Caption strip just below the badge (label tier, clear of the halo)
+    container.add(this.add.text(0, radius + 30, label, style('caption', {
+      fontSize: '36px',
       fill: '#ffffff',
       fontStyle: '900',
       stroke: '#0a0a18',
@@ -163,7 +167,7 @@ export class ShopScene extends Phaser.Scene {
   }
 
   refreshPlayerAvatar() {
-    // Pet — show as it would appear in the world, with all equipped cosmetics
+    // Pet: show as it would appear in the world, with all equipped cosmetics
     if (this.petBadge) {
       this.petBadge.preview.removeAll(true);
       if (companion.hasStarter()) {
@@ -176,7 +180,7 @@ export class ShopScene extends Phaser.Scene {
       }
     }
 
-    // Ship — equipped parts, no trail, no pet inside the porthole (this is
+    // Ship: equipped parts, no trail, no pet inside the porthole (this is
     // about the ship loadout itself, not the composite portrait).
     if (this.shipBadge) {
       this.shipBadge.preview.removeAll(true);
@@ -191,11 +195,8 @@ export class ShopScene extends Phaser.Scene {
 
   createTabBar() {
     const tabY = 280;
-    const tabW = 180;
     const tabH = 80;
-    const gap = 10;
-    const totalW = TABS.length * tabW + (TABS.length - 1) * gap;
-    const startX = W / 2 - totalW / 2 + tabW / 2;
+    const gap = 8;
 
     // Solid backing strip behind tabs so scrolling cards never bleed through.
     const backing = this.add.graphics().setDepth(28);
@@ -204,6 +205,21 @@ export class ShopScene extends Phaser.Scene {
     backing.fillStyle(COLORS.bgDark, 0.6);
     backing.fillRect(0, 350, W, 12);
 
+    // Tab labels are button labels (42). Every tab takes the width of the
+    // widest label plus padding, capped so all five fit inside a 16px gutter.
+    // If a wider device font still can't fit, the labels drop to the 36 floor.
+    const labels = TABS.map(tab => this.add.text(0, 0, tab.label, style('caption', {
+      fontSize: '42px',
+      fill: '#ffffff',
+      fontStyle: '900'
+    })).setOrigin(0.5));
+    const widest = () => Math.max(...labels.map(l => l.width));
+    const maxTabW = Math.floor((W - 32 - (TABS.length - 1) * gap) / TABS.length);
+    const tabW = Math.min(maxTabW, Math.max(180, Math.ceil(widest()) + 48));
+    if (widest() + 24 > tabW) labels.forEach(l => l.setFontSize('36px'));
+    const totalW = TABS.length * tabW + (TABS.length - 1) * gap;
+    const startX = W / 2 - totalW / 2 + tabW / 2;
+
     this.tabContainers = {};
     TABS.forEach((tab, i) => {
       const x = startX + i * (tabW + gap);
@@ -211,11 +227,7 @@ export class ShopScene extends Phaser.Scene {
 
       const bg = this.add.graphics();
       c.add(bg);
-      const label = this.add.text(0, 0, tab.label, style('caption', {
-        fontSize: '24px',
-        fill: '#ffffff',
-        fontStyle: '900'
-      })).setOrigin(0.5);
+      const label = labels[i];
       c.add(label);
 
       const hit = this.add.rectangle(0, 0, tabW, tabH, 0x000000, 0)
@@ -255,12 +267,12 @@ export class ShopScene extends Phaser.Scene {
   }
 
   installScrollControls() {
-    // Mouse wheel — works regardless of cursor position
+    // Mouse wheel: works regardless of cursor position
     this.input.on('wheel', (_pointer, _objs, _dx, dy) => {
       this.applyScroll(dy);
     });
 
-    // Touch / mouse drag — listen scene-wide so drag works even when the
+    // Touch / mouse drag: listen scene-wide so drag works even when the
     // pointer starts ON a card. Cards check `this.dragMoved` before firing
     // their tap, so a swipe scrolls instead of triggering buy/equip.
     this.dragMoved = false;
@@ -319,31 +331,33 @@ export class ShopScene extends Phaser.Scene {
 
     const items = this.itemsForTab(this.activeTab);
 
-    const cols = 3;
-    const cardW = 320;
-    const cardH = 380;
-    const gapX = 18;
-    const gapY = 22;
+    // Two wide cards per row so names, flavor lines and price pills can read
+    // at full size. Card height follows the text: each row is as tall as its
+    // tallest card, and both cards in a row share that height.
+    const cols = 2;
+    const cardW = 496;
+    const gapX = 24;
+    const gapY = 28;
     const startX = W / 2 - (cols * cardW + (cols - 1) * gapX) / 2 + cardW / 2;
     // Place the first row just inside the scroll viewport.
-    const startY = this.scrollTop + cardH / 2 + 20;
+    let rowTop = this.scrollTop + 20;
 
-    items.forEach((item, i) => {
-      const col = i % cols;
-      const row = Math.floor(i / cols);
-      const x = startX + col * (cardW + gapX);
-      const y = startY + row * (cardH + gapY);
-      const card = this.makeShopCard(item, this.activeTab, cardW, cardH);
-      card.x = x;
-      card.y = y;
-      this.scrollLayer.add(card);
-      this.cardObjects.push(card);
-    });
+    const cards = items.map(item => this.makeShopCard(item, this.activeTab, cardW));
+    for (let r = 0; r < cards.length; r += cols) {
+      const row = cards.slice(r, r + cols);
+      const rowH = Math.ceil(Math.max(CARD_MIN_H, ...row.map(card => card.minH || 0)));
+      row.forEach((card, col) => {
+        card.layoutTo?.(rowH);
+        card.x = startX + col * (cardW + gapX);
+        card.y = rowTop + rowH / 2;
+        this.scrollLayer.add(card);
+        this.cardObjects.push(card);
+      });
+      rowTop += rowH + gapY;
+    }
 
     // Compute scroll bounds: total content extent minus visible viewport.
-    const rows = Math.ceil(items.length / cols);
-    const contentHeight = rows * (cardH + gapY) - gapY;
-    const contentBottom = startY - cardH / 2 + contentHeight;
+    const contentBottom = rowTop - gapY;
     this.scrollMaxOffset = Math.max(0, contentBottom - this.scrollBottom + 40);
     this.scrollOffset = resetScroll ? 0 : this.scrollOffset;
     this.applyScroll(0);
@@ -379,7 +393,11 @@ export class ShopScene extends Phaser.Scene {
     return ranked.map(r => r.item);
   }
 
-  makeShopCard(item, tabId, w, h) {
+  // Builds a card at width `w`. Its text is measured here and `minH` is the
+  // height it needs; the grid then calls `layoutTo(h)` with the row height,
+  // which draws the panel and places everything top-down (pill pinned to the
+  // bottom) so both cards in a row line up.
+  makeShopCard(item, tabId, w) {
     const c = this.add.container(0, 0).setDepth(12);
 
     const isPetItem = TAB_BY_ID[tabId]?.kind === 'pet';
@@ -396,11 +414,15 @@ export class ShopScene extends Phaser.Scene {
     if (equipped) borderColor = COLORS.success;
     else if (owned) borderColor = COLORS.accentTeal;
 
-    // Legendary halo behind the card
+    const PAD = 16;          // panel edge to chip / pill
+    const TEXT_W = w - 48;   // wrap width for the name and flavor line
+    const ART_H = 200;       // band under the chip that holds the preview
+
+    // Panel layers come first so the art and text stay on top of them. They
+    // are drawn in layoutTo() once the row height is known.
+    let halo = null;
     if (rarity === 'legendary') {
-      const halo = this.add.graphics();
-      halo.fillStyle(rarityColor, 0.18);
-      halo.fillRoundedRect(-w / 2 - 12, -h / 2 - 12, w + 24, h + 24, 22);
+      halo = this.add.graphics();
       c.add(halo);
       this.tweens.add({
         targets: halo, alpha: { from: 0.18, to: 0.45 },
@@ -409,19 +431,11 @@ export class ShopScene extends Phaser.Scene {
     }
 
     const bg = this.add.graphics();
-    bg.fillStyle(COLORS.bgPanel, 0.95);
-    bg.fillRoundedRect(-w / 2, -h / 2, w, h, 18);
-    bg.lineStyle(equipped || owned ? 4 : 3, borderColor, owned || canAfford ? 1 : 0.7);
-    bg.strokeRoundedRect(-w / 2, -h / 2, w, h, 18);
     c.add(bg);
 
     // Status wash so equipped vs owned reads at a glance, not just on the border.
-    if (equipped || owned) {
-      const wash = this.add.graphics();
-      wash.fillStyle(equipped ? COLORS.success : COLORS.accentTeal, equipped ? 0.12 : 0.08);
-      wash.fillRoundedRect(-w / 2, -h / 2, w, h, 18);
-      c.add(wash);
-    }
+    const wash = (equipped || owned) ? this.add.graphics() : null;
+    if (wash) c.add(wash);
 
     // Rare items pulse the border
     if (rarity === 'rare' && !equipped && !owned) {
@@ -431,83 +445,144 @@ export class ShopScene extends Phaser.Scene {
       });
     }
 
-    // Rarity chip top-left
+    // Rarity chip top-left, sized from its label
     const chip = this.add.graphics();
-    chip.fillStyle(rarityColor, 0.95);
-    chip.fillRoundedRect(-w / 2 + 12, -h / 2 + 12, 100, 28, 14);
     c.add(chip);
-    c.add(this.add.text(-w / 2 + 62, -h / 2 + 26, RARITY_LABEL[rarity], style('caption', {
-      fontSize: '14px', fill: '#0a0a1a', fontStyle: '900'
-    })).setOrigin(0.5));
+    const chipLabel = this.add.text(0, 0, RARITY_LABEL[rarity], style('caption', {
+      fontSize: '36px', fill: '#0a0a1a', fontStyle: '900'
+    })).setOrigin(0.5);
+    c.add(chipLabel);
+    const chipW = Math.ceil(chipLabel.width) + 32;
+    const chipH = Math.ceil(chipLabel.height) + 10;
 
-    // Preview area — actually render the cosmetic ON the pet (or ship) so the
+    // Preview area: actually render the cosmetic ON the pet (or ship) so the
     // card shows what you'd be buying, not just a base pet next to a color dot.
-    const previewY = -h / 2 + 140;
+    // Scaled up with the wider 2-column card so the art still fills its band.
+    let preview;
     if (isPetItem) {
       const previewCosmetics = { ...cosmetics.getEquipped(), [item.slot]: item.id };
-      const pet = drawCompanion(this, 0, previewY, {
-        scale: 0.7,
+      preview = drawCompanion(this, 0, 0, {
+        scale: 0.9,
         preview: true,
         cosmeticsOverride: previewCosmetics
       });
-      c.add(pet);
     } else {
       const previewParts = { ...ship.getCurrentParts(), [item.slot]: item.id };
-      const preview = drawShip(this, 0, previewY, { scale: 0.85, parts: previewParts, showTrail: tabId === 'trail' });
-      c.add(preview);
+      preview = drawShip(this, 0, 0, { scale: 1.05, parts: previewParts, showTrail: tabId === 'trail' });
     }
+    c.add(preview);
 
-    // Name
-    c.add(this.add.text(0, h / 2 - 130, item.name, style('subhead', {
-      fontSize: '24px',
+    // Name (a name inside a card: heading tier)
+    const nameText = this.add.text(0, 0, item.name, style('subhead', {
+      fontSize: '52px',
       fill: '#ffffff',
       align: 'center',
-      wordWrap: { width: w - 32 }
-    })).setOrigin(0.5));
+      wordWrap: { width: TEXT_W }
+    })).setOrigin(0.5, 0);
+    c.add(nameText);
 
-    // One-line flavor under the name (falls back to a generic line by rarity).
-    const descText = item.desc || rarityFlavor(rarity);
-    c.add(this.add.text(0, h / 2 - 98, descText, style('caption', {
-      fontSize: '15px',
-      fill: '#9aa0b0',
+    // Flavor line under the name (falls back to a generic line by rarity).
+    const descText = this.add.text(0, 0, item.desc || rarityFlavor(rarity), style('body', {
+      fill: '#cfcfe0',
       align: 'center',
-      wordWrap: { width: w - 32 },
+      wordWrap: { width: TEXT_W },
       fontStyle: 'italic'
-    })).setOrigin(0.5));
+    })).setOrigin(0.5, 0);
+    c.add(descText);
 
-    // Status badge
-    const badgeY = h / 2 - 50;
+    // Status / price pill, sized from its label. It is the card's action, so
+    // it reads at button size.
     let badgeText = '';
     let badgeColor = COLORS.accentTeal;
     let badgeFill = '#0a0a1a';
-    // Default items can't be "unequipped" — they ARE the unequipped state.
+    const lockedFill = '#cfcfe0';
+    // Default items can't be "unequipped": they ARE the unequipped state.
     const isDefault = !!item.isDefault;
     if (equipped && isDefault) { badgeText = 'EQUIPPED'; badgeColor = COLORS.success; }
     else if (equipped) { badgeText = 'TAP TO UNEQUIP'; badgeColor = COLORS.success; }
     else if (owned) { badgeText = 'TAP TO EQUIP'; badgeColor = COLORS.accentTeal; }
-    else if (item.unlock_only) { badgeText = '??? · UNLOCK BY PLAYING'; badgeColor = 0x3a3a4a; badgeFill = '#7a7a90'; }
+    else if (item.unlock_only) { badgeText = '??? · UNLOCK BY PLAYING'; badgeColor = 0x3a3a4a; badgeFill = lockedFill; }
     else if (item.price === 0) { badgeText = 'FREE'; badgeColor = COLORS.accentPurple; }
-    else { badgeText = `${item.price} STARDUST`; badgeColor = canAfford ? COLORS.accentPurple : 0x3a3a4a; if (!canAfford) badgeFill = '#7a7a90'; }
+    else { badgeText = `${item.price} STARDUST`; badgeColor = canAfford ? COLORS.accentPurple : 0x3a3a4a; if (!canAfford) badgeFill = lockedFill; }
 
     const badge = this.add.graphics();
-    badge.fillStyle(badgeColor, 0.95);
-    badge.fillRoundedRect(-w / 2 + 24, badgeY - 22, w - 48, 44, 22);
     c.add(badge);
-    c.add(this.add.text(0, badgeY, badgeText, style('caption', {
-      fontSize: badgeText.length > 18 ? '16px' : '20px',
+    const pillMaxW = w - PAD * 2;
+    const badgeLabel = this.add.text(0, 0, badgeText, style('caption', {
+      fontSize: '42px',
       fill: badgeFill,
-      fontStyle: '900'
-    })).setOrigin(0.5));
+      fontStyle: '900',
+      align: 'center',
+      wordWrap: { width: pillMaxW - 40 }
+    })).setOrigin(0.5);
+    c.add(badgeLabel);
+    const pillW = Math.min(pillMaxW, Math.ceil(badgeLabel.width) + 56);
+    const pillH = Math.ceil(badgeLabel.height) + 22;
 
+    let checkG = null;
     if (equipped) {
-      const checkG = this.add.graphics();
-      drawCheckIcon(checkG, 0, 0, 16);
-      checkG.x = w / 2 - 28;
-      checkG.y = -h / 2 + 28;
+      checkG = this.add.graphics();
+      drawCheckIcon(checkG, 0, 0, 22);
       c.add(checkG);
     }
 
-    const hit = this.add.rectangle(0, 0, w, h, 0x000000, 0)
+    c.minH = PAD + chipH + ART_H
+      + nameText.height + 6 + descText.height
+      + 20 + pillH + PAD;
+
+    c.layoutTo = (h) => {
+      const top = -h / 2;
+
+      if (halo) {
+        halo.fillStyle(rarityColor, 0.18);
+        halo.fillRoundedRect(-w / 2 - 12, -h / 2 - 12, w + 24, h + 24, 22);
+      }
+
+      bg.fillStyle(COLORS.bgPanel, 0.95);
+      bg.fillRoundedRect(-w / 2, -h / 2, w, h, 18);
+      bg.lineStyle(equipped || owned ? 4 : 3, borderColor, owned || canAfford ? 1 : 0.7);
+      bg.strokeRoundedRect(-w / 2, -h / 2, w, h, 18);
+
+      if (wash) {
+        wash.fillStyle(equipped ? COLORS.success : COLORS.accentTeal, equipped ? 0.12 : 0.08);
+        wash.fillRoundedRect(-w / 2, -h / 2, w, h, 18);
+      }
+
+      chip.fillStyle(rarityColor, 0.95);
+      chip.fillRoundedRect(-w / 2 + PAD, top + PAD, chipW, chipH, chipH / 2);
+      chipLabel.setPosition(-w / 2 + PAD + chipW / 2, top + PAD + chipH / 2);
+      if (checkG) {
+        checkG.x = w / 2 - 36;
+        checkG.y = top + PAD + chipH / 2;
+      }
+
+      const artTop = top + PAD + chipH;
+      // Trails stream down from the ship, so the ship rides high in the band
+      // and its trail fades out above the name instead of running through it.
+      preview.y = artTop + (tabId === 'trail' ? 66 : ART_H / 2);
+
+      nameText.y = artTop + ART_H;
+      descText.y = nameText.y + nameText.height + 6;
+
+      const badgeY = h / 2 - PAD - pillH / 2;
+      badge.fillStyle(badgeColor, 0.95);
+      badge.fillRoundedRect(-pillW / 2, badgeY - pillH / 2, pillW, pillH, Math.min(pillH / 2, 36));
+      badgeLabel.y = badgeY;
+
+      hit.setSize(w, h);
+      if (hit.input) hit.input.hitArea.setTo(0, 0, w, h);
+    };
+
+    // Locked items (unowned + can't afford OR unlock-only) dim their artwork
+    // only. The name, flavor line and price stay at full strength so they
+    // can still be read.
+    if ((!owned && !canAfford && item.price > 0) || (!owned && item.unlock_only)) {
+      preview.setAlpha(0.55);
+    }
+
+    // The tap area is the card's last child, sized to minH until the grid
+    // calls layoutTo() with the row height.
+    const hit = this.add.rectangle(0, 0, w, c.minH, 0x000000, 0)
       .setInteractive({ useHandCursor: true });
     c.add(hit);
     // Fire only on a complete down→up on the same card. Without the pressed
@@ -534,11 +609,6 @@ export class ShopScene extends Phaser.Scene {
       pressedPointer = null;
       this.tweens.add({ targets: c, scale: 1, duration: 100 });
     });
-
-    // Locked items (unowned + can't afford OR unlock-only) fade out.
-    if ((!owned && !canAfford && item.price > 0) || (!owned && item.unlock_only)) {
-      c.setAlpha(0.55);
-    }
 
     return c;
   }
@@ -573,13 +643,13 @@ export class ShopScene extends Phaser.Scene {
       return;
     }
 
-    // Unlock-only items — can't be bought, can't be claimed. Just acknowledge.
+    // Unlock-only items: can't be bought, can't be claimed. Just acknowledge.
     if (item.unlock_only) {
       audio.playClick();
       return;
     }
 
-    // Free items (price 0, but not isDefault) — claim instantly, no confirm.
+    // Free items (price 0, but not isDefault): claim instantly, no confirm.
     if (item.price === 0) {
       audio.playClick();
       if (isShipItem) ship.addAndEquip(item.id);
@@ -590,44 +660,70 @@ export class ShopScene extends Phaser.Scene {
       return;
     }
 
-    // Paid purchase — confirm before spending.
+    // Paid purchase: confirm before spending.
     audio.playClick();
     this.showPurchaseConfirm(item, tabId);
   }
 
   showPurchaseConfirm(item, tabId) {
     const mw = 760;
-    const mh = 540;
-    const { card: modal, close } = createModal(this, {
-      width: mw, height: mh,
-      depth: 80,
-      overlayAlpha: 0.7,
-      overlayFadeMs: 200,
-      accentColor: COLORS.accentPurple,
-      showCloseHint: false,
-    });
 
-    modal.add(this.add.text(0, -mh / 2 + 60, 'Buy this item?', style('display', {
-      fontSize: '46px', fill: '#ffffff'
-    })).setOrigin(0.5));
+    // Text is built first and measured, so the card grows to fit it and the
+    // buttons always sit below the balance line. The question is the moment's
+    // title (64), a step above the item name (52) under it.
+    const title = this.add.text(0, 0, 'Buy this item?', style('display', {
+      fontSize: '64px', fill: '#ffffff',
+      align: 'center', wordWrap: { width: mw - 80 }
+    })).setOrigin(0.5, 0);
 
-    modal.add(this.add.text(0, -mh / 2 + 150, item.name, style('subhead', {
-      fontSize: '38px', fill: '#cfcfe0', fontStyle: '900'
-    })).setOrigin(0.5));
+    const nameText = this.add.text(0, 0, item.name, style('subhead', {
+      fontSize: '52px', fill: '#cfcfe0', fontStyle: '900',
+      align: 'center', wordWrap: { width: mw - 80 }
+    })).setOrigin(0.5, 0);
 
-    // Stardust price chip — same visual language as the summary chip.
+    // Stardust price chip, same visual language as the summary chip.
     const priceLabel = this.add.text(0, 0, `${item.price} STARDUST`, style('subhead', {
-      fontSize: '36px', fill: '#ffffff', fontStyle: '900',
+      fontSize: '42px', fill: '#ffffff', fontStyle: '900',
       stroke: '#0a0a18', strokeThickness: 3
     })).setOrigin(0, 0.5);
+
+    // Balance after purchase
+    const remaining = economy.getStardust() - item.price;
+    const balanceText = this.add.text(0, 0, `Balance after: ${remaining}`, style('body', {
+      fill: '#cfcfe0'
+    })).setOrigin(0.5, 0);
+
     const iconBoxW = 50;
     const gap = 14;
     const totalW = iconBoxW + gap + priceLabel.width;
     const groupLeft = -totalW / 2;
     const chipW = Math.max(360, totalW + 80);
-    const chipH = 80;
+    const chipH = Math.max(80, Math.ceil(priceLabel.height) + 24);
     const r = chipH / 2;
-    const chipY = -mh / 2 + 250;
+    const btnH = 92;
+
+    const mh = Math.ceil(48 + title.height + 20 + nameText.height + 36
+      + chipH + 28 + balanceText.height + 44 + btnH + 44);
+
+    const { card: modal, overlay, close } = createModal(this, {
+      width: mw, height: mh,
+      depth: 80,
+      overlayAlpha: 0.7,
+      accentColor: COLORS.accentPurple,
+      showCloseHint: false,
+    });
+    // Dim the shop behind the popup so the popup reads on its own. The fade
+    // runs on the fill, so the backdrop blocks taps from the first frame.
+    overlay.fillAlpha = 0;
+    this.tweens.add({ targets: overlay, fillAlpha: 0.7, duration: 200 });
+
+    title.y = -mh / 2 + 48;
+    modal.add(title);
+
+    nameText.y = title.y + title.height + 20;
+    modal.add(nameText);
+
+    const chipY = nameText.y + nameText.height + 36 + chipH / 2;
 
     const chipHalo = this.add.graphics();
     chipHalo.fillStyle(COLORS.accentPurple, 0.20);
@@ -655,21 +751,19 @@ export class ShopScene extends Phaser.Scene {
     priceLabel.y = chipY;
     modal.add(priceLabel);
 
-    // Balance after purchase
-    const remaining = economy.getStardust() - item.price;
-    modal.add(this.add.text(0, chipY + 80, `Balance after: ${remaining}`, style('caption', {
-      fontSize: '26px', fill: '#aaaac0'
-    })).setOrigin(0.5));
+    balanceText.y = chipY + chipH / 2 + 28;
+    modal.add(balanceText);
 
+    const btnY = mh / 2 - 44 - btnH / 2;
     modal.add(createButton(this, {
-      x: -160, y: mh / 2 - 80, width: 280, height: 92,
+      x: -160, y: btnY, width: 280, height: btnH,
       label: 'Cancel',
       color: 0x4a4a6a,
       onClick: close
     }));
 
     modal.add(createButton(this, {
-      x: 160, y: mh / 2 - 80, width: 280, height: 92,
+      x: 160, y: btnY, width: 280, height: btnH,
       label: 'Buy',
       color: COLORS.accentPurple,
       onClick: () => {
@@ -698,21 +792,28 @@ export class ShopScene extends Phaser.Scene {
     bg.fillRect(0, H - 110, W, 110);
 
     const c = this.add.container(W / 2, H - 55).setDepth(16);
-    const sparkle = this.add.graphics();
-    drawSparkleIcon(sparkle, -100, 0, 18);
-    c.add(sparkle);
+    this.balanceSparkle = this.add.graphics();
+    drawSparkleIcon(this.balanceSparkle, 0, 0, 22);
+    c.add(this.balanceSparkle);
 
-    this.balanceText = this.add.text(0, 0, `${economy.getStardust()} STARDUST`, style('subhead', {
-      fontSize: '32px',
+    this.balanceText = this.add.text(0, 0, '', style('subhead', {
+      fontSize: '42px',
       fill: '#c77eff',
       fontStyle: '900'
-    })).setOrigin(0.5);
+    })).setOrigin(0, 0.5);
     c.add(this.balanceText);
+    this.refreshBalance();
   }
 
+  // The sparkle and the amount are centered as one group, so the icon keeps
+  // its spacing however wide the number gets.
   refreshBalance() {
-    if (this.balanceText) {
-      this.balanceText.setText(`${economy.getStardust()} STARDUST`);
-    }
+    if (!this.balanceText) return;
+    this.balanceText.setText(`${economy.getStardust()} STARDUST`);
+    const iconW = 28;
+    const gap = 14;
+    const left = -(iconW + gap + this.balanceText.width) / 2;
+    this.balanceSparkle.x = left + iconW / 2;
+    this.balanceText.x = left + iconW + gap;
   }
 }

@@ -41,10 +41,13 @@ function drawSilhouette(scene, c) {
   g.lineStyle(3, 0x2a2a44, 1);
   g.strokeCircle(0, 0, 62);
   c.add(g);
+  // A decorative glyph painted on the locked blob, deliberately dim (it marks
+  // "not yet", nothing to read), so it is exempt from the text floor.
   const q = scene.add.text(0, 4, '?', style('display', {
     fontSize: '64px',
     fill: '#3a3a4a',
-    strokeThickness: 4
+    strokeThickness: 4,
+    art: true
   })).setOrigin(0.5);
   c.add(q);
 }

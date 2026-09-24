@@ -7,7 +7,7 @@
 // to the arcade hub.
 
 import { progress } from './GameData.js';
-import { style } from './textStyles.js';
+import { style, TYPE } from './textStyles.js';
 import { COLORS } from './colorPalette.js';
 import { createButton } from './buttonHelper.js';
 import { TransitionManager } from './TransitionManager.js';
@@ -55,10 +55,12 @@ export function showArcadeResults(scene, opts) {
   }
 
   const overlay = scene.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0).setDepth(70).setInteractive();
-  scene.tweens.add({ targets: overlay, alpha: 0.78, duration: 320 });
+  scene.tweens.add({ targets: overlay, fillAlpha: 0.78, duration: 320 });
 
-  const panelW = 760;
-  const panelH = 560;
+  // Sized for the 64px title and 52/42px stat lines (the longest title,
+  // GAUNTLET CLEARED, is about 670px wide at 64).
+  const panelW = 860;
+  const panelH = 620;
   const panel = scene.add.container(W / 2, H + panelH / 2).setDepth(71);
 
   const bg = scene.add.graphics();
@@ -68,35 +70,38 @@ export function showArcadeResults(scene, opts) {
   bg.strokeRoundedRect(-panelW / 2, -panelH / 2, panelW, panelH, 28);
   panel.add(bg);
 
-  panel.add(scene.add.text(0, -panelH / 2 + 80, title, style('display', {
-    fontSize: '50px',
+  panel.add(scene.add.text(0, -panelH / 2 + 90, title, style('display', {
+    fontSize: `${TYPE.title}px`,
     fill: '#' + accent.toString(16).padStart(6, '0')
   })).setOrigin(0.5));
 
+  // The headline stat on the heading tier, the second line as body text.
   lines.forEach((t, i) => {
-    panel.add(scene.add.text(0, -panelH / 2 + 190 + i * 64, t, style('subhead', {
-      fontSize: i === 0 ? '38px' : '32px',
+    panel.add(scene.add.text(0, -panelH / 2 + 200 + i * 80, t, style('subhead', {
+      fontSize: `${i === 0 ? TYPE.heading : TYPE.body}px`,
       fill: i === 0 ? '#ffffff' : '#cfcfe0'
     })).setOrigin(0.5));
   });
 
   if (wasBest) {
-    panel.add(scene.add.text(0, -panelH / 2 + 330, 'NEW BEST!', style('subhead', {
-      fontSize: '38px',
+    panel.add(scene.add.text(0, -panelH / 2 + 370, 'NEW BEST!', style('subhead', {
+      fontSize: `${TYPE.body}px`,
       fill: '#fbbf24'
     })).setOrigin(0.5));
   }
 
-  const btnY = panelH / 2 - 90;
+  // Two 270-wide buttons with a 40px gap between them, so a kid's thumb
+  // lands on the one it meant.
+  const btnY = panelH / 2 - 95;
   panel.add(createButton(scene, {
-    x: -130, y: btnY, label: 'Retry',
-    width: 250, height: 88,
+    x: -155, y: btnY, label: 'Retry',
+    width: 270, height: 88,
     color: 0x4a4a6a,
     onClick: () => scene.scene.start(launcherKey)
   }));
   panel.add(createButton(scene, {
-    x: 130, y: btnY, label: 'Done',
-    width: 250, height: 88,
+    x: 155, y: btnY, label: 'Done',
+    width: 270, height: 88,
     color: accent,
     onClick: () => new TransitionManager(scene).fadeToScene(doneScene)
   }));

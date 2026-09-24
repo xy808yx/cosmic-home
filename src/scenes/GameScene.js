@@ -287,22 +287,32 @@ export class GameScene extends Phaser.Scene {
 
   showTutorialHint() {
     if (this._tutorialHint) return;
-    const c = this.add.container(W / 2, H - 540).setDepth(50);
-    const bg = this.add.graphics();
-    bg.fillStyle(0x12122a, 0.92);
-    bg.fillRoundedRect(-360, -48, 720, 96, 18);
-    bg.lineStyle(3, 0xffd86b, 1);
-    bg.strokeRoundedRect(-360, -48, 720, 96, 18);
-    c.add(bg);
-    c.add(this.add.text(0, -8, 'Tap the matching answer', style('subhead', {
-      fontSize: '28px',
+    // Two body-size lines in a box sized from the text. The box sits over the
+    // ship and its bottom (with the 5% pulse) stays clear of the answer grid.
+    const c = this.add.container(W / 2, H - 574).setDepth(50);
+    const line1 = this.add.text(0, 0, 'Tap the matching answer', style('subhead', {
+      fontSize: '42px',
       fill: '#ffd86b',
       fontStyle: '900'
-    })).setOrigin(0.5));
-    c.add(this.add.text(0, 22, 'to crunch the asteroid', style('caption', {
-      fontSize: '20px',
-      fill: '#cfcfe0'
-    })).setOrigin(0.5));
+    })).setOrigin(0.5);
+    const line2 = this.add.text(0, 0, 'to crunch the asteroid', style('body', {
+      fontSize: '42px',
+      fill: '#e0e0ef'
+    })).setOrigin(0.5);
+    const padX = 48;
+    const padY = 16;
+    const boxW = Math.ceil(Math.max(line1.width, line2.width)) + padX * 2;
+    const boxH = Math.ceil(line1.height + line2.height) + padY * 2;
+    line1.y = -boxH / 2 + padY + line1.height / 2;
+    line2.y = line1.y + line1.height / 2 + line2.height / 2;
+    const bg = this.add.graphics();
+    bg.fillStyle(0x12122a, 0.92);
+    bg.fillRoundedRect(-boxW / 2, -boxH / 2, boxW, boxH, 18);
+    bg.lineStyle(3, 0xffd86b, 1);
+    bg.strokeRoundedRect(-boxW / 2, -boxH / 2, boxW, boxH, 18);
+    c.add(bg);
+    c.add(line1);
+    c.add(line2);
     // Gentle pulse to draw the eye.
     this.tweens.add({
       targets: c,
@@ -701,9 +711,13 @@ export class GameScene extends Phaser.Scene {
     bar.barH = h;
     bar.barRadius = radius;
 
-    bar.add(this.add.text(0, -h / 2 - 28, (this.world.villain || 'BOSS').toUpperCase(), style('caption', {
-      fontSize: '22px', fill: '#ff8080', fontStyle: '900'
-    })).setOrigin(0.5));
+    // Outlined so the name holds up over any world backdrop. update() keeps
+    // it hidden while the bar is still under the top bar.
+    bar.nameText = this.add.text(0, -h / 2 - 8, (this.world.villain || 'BOSS').toUpperCase(), style('caption', {
+      fontSize: '36px', fill: '#ff8080', fontStyle: '900',
+      stroke: '#0a0a1a', strokeThickness: 5
+    })).setOrigin(0.5, 1);
+    bar.add(bar.nameText);
 
     this.bossHpBar = bar;
     this.bossContainer = bossContainer;
@@ -1550,15 +1564,17 @@ export class GameScene extends Phaser.Scene {
 
     const overlay = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0)
       .setDepth(65).setInteractive();
-    this.tweens.add({ targets: overlay, alpha: 0.72, duration: 220 });
+    this.tweens.add({ targets: overlay, fillAlpha: 0.72, duration: 220 });
 
     const cardW = 880;
     const cardH = 360;
     const card = this.add.container(W / 2, H / 2 - 40).setDepth(66);
     card.setAlpha(0);
 
+    // Fully opaque so the asteroid's problem behind the card never ghosts
+    // through next to the corrected equation.
     const bg = this.add.graphics();
-    bg.fillStyle(COLORS.bgPanel, 0.96);
+    bg.fillStyle(COLORS.bgPanel, 1);
     bg.fillRoundedRect(-cardW / 2, -cardH / 2, cardW, cardH, 32);
     bg.lineStyle(3, this.world.accentColor, 0.85);
     bg.strokeRoundedRect(-cardW / 2, -cardH / 2, cardW, cardH, 32);
@@ -1587,9 +1603,9 @@ export class GameScene extends Phaser.Scene {
     })).setOrigin(0.5);
     card.add(eqText);
 
-    const hint = this.add.text(0, cardH / 2 - 56, 'Tap to continue', style('caption', {
-      fontSize: '28px',
-      fill: '#cfcfe0'
+    const hint = this.add.text(0, cardH / 2 - 56, 'Tap to continue', style('body', {
+      fontSize: '42px',
+      fill: '#e0e0ef'
     })).setOrigin(0.5);
     card.add(hint);
 
@@ -1600,9 +1616,10 @@ export class GameScene extends Phaser.Scene {
       duration: 260,
       ease: 'Back.easeOut'
     });
+    // The pulse never dips below 0.8 so the hint stays readable.
     this.tweens.add({
       targets: hint,
-      alpha: { from: 0.55, to: 1 },
+      alpha: { from: 0.8, to: 1 },
       duration: 700,
       yoyo: true,
       repeat: -1,
@@ -1678,27 +1695,42 @@ export class GameScene extends Phaser.Scene {
   // Calls onComplete when fully dismissed.
   showWorldClearBanner(onComplete) {
     const bannerW = 960;
-    const bannerH = 160;
     const accent = this.world.accentColor;
+    const hasPet = companion.hasStarter();
+
+    // The title fills the space left of the pet and wraps to a second line
+    // for long world names; the banner grows to fit it.
+    const textLeft = -bannerW / 2 + 36;
+    const textRight = hasPet ? bannerW / 2 - 150 : bannerW / 2 - 36;
+    const textW = textRight - textLeft;
+    // Same ink rule as the buttons: dark lettering on the light pastel faces
+    // (white there only read through its outline), white on dark faces.
+    const faceLum = (0.299 * ((accent >> 16) & 0xff) + 0.587 * ((accent >> 8) & 0xff) + 0.114 * (accent & 0xff)) / 255;
+    const lightFace = faceLum > 0.6;
+    const title = this.add.text((textLeft + textRight) / 2, 0, `${this.world.name.toUpperCase()} CLEARED!`, style('display', {
+      fontSize: '64px',
+      fill: lightFace ? '#0a0a1a' : '#ffffff',
+      stroke: '#0a0a1a',
+      strokeThickness: lightFace ? 0 : 5,
+      fontStyle: '900',
+      align: 'center',
+      wordWrap: { width: textW }
+    })).setOrigin(0.5);
+    if (title.width > textW) title.setScale(textW / title.width);
+    const bannerH = Math.max(160, Math.ceil(title.height * title.scaleY) + 40);
     const startY = -bannerH / 2 - 20;
-    const restY = 220;
+    const restY = Math.max(220, bannerH / 2 + 30);
 
     const banner = this.add.container(W / 2, startY).setDepth(70);
 
+    // Fully opaque so the top bar's stat labels never ghost through the title.
     const bg = this.add.graphics();
-    bg.fillStyle(accent, 0.95);
+    bg.fillStyle(accent, 1);
     bg.fillRoundedRect(-bannerW / 2, -bannerH / 2, bannerW, bannerH, 26);
     bg.lineStyle(4, 0x0a0a1a, 1);
     bg.strokeRoundedRect(-bannerW / 2, -bannerH / 2, bannerW, bannerH, 26);
     banner.add(bg);
-
-    banner.add(this.add.text(0, 0, `${this.world.name.toUpperCase()} CLEARED!`, style('display', {
-      fontSize: '58px',
-      fill: '#ffffff',
-      stroke: '#0a0a1a',
-      strokeThickness: 5,
-      fontStyle: '900'
-    })).setOrigin(0.5));
+    banner.add(title);
 
     // Drop + pop: ease in, then briefly scale 1.0 → 1.08 → 1.0 for impact.
     banner.setScale(0.9);
@@ -1721,7 +1753,7 @@ export class GameScene extends Phaser.Scene {
 
     // Pet bounces in beside the banner — happy victory hop loop.
     let petContainer = null;
-    if (companion.hasStarter()) {
+    if (hasPet) {
       const petX = bannerW / 2 - 70;
       petContainer = this.add.container(petX, 0);
       banner.add(petContainer);
@@ -2090,6 +2122,18 @@ export class GameScene extends Phaser.Scene {
     if (this.bossHpBar?.active && this.bossContainer?.active) {
       this.bossHpBar.x = this.bossContainer.x;
       this.bossHpBar.y = this.bossContainer.y - ASTEROID_RADIUS * BOSS_CONFIG.asteroidScale - 60;
+      // Each new problem drops the boss in from the top, so the bar slides
+      // out from under the top bar. The villain name on it stays hidden until
+      // it clears the top bar (and the Boss Rush counter), then fades in, so
+      // it never lands on the stat labels. The top bar already shows the name.
+      const nameText = this.bossHpBar.nameText;
+      if (nameText?.active) {
+        const nameTop = this.bossHpBar.y + nameText.y - nameText.height;
+        const clearY = this._bossRushCounter?.active
+          ? this._bossRushCounter.y + this._bossRushCounter.height + 8
+          : TOP_BAR_H + 8;
+        nameText.setAlpha(Phaser.Math.Clamp((nameTop - clearY) / 40, 0, 1));
+      }
     }
 
     // Arcade modes have no round timer — Boss Rush ends on boss defeat / ship
@@ -2149,10 +2193,34 @@ export class GameScene extends Phaser.Scene {
     }
 
     const overlay = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0).setDepth(50).setInteractive();
-    this.tweens.add({ targets: overlay, alpha: 0.8, duration: 350 });
+    this.tweens.add({ targets: overlay, fillAlpha: 0.8, duration: 350 });
 
+    // Laid out top-down from the measured caption, then the panel is sized
+    // to fit, so a two-line caption pushes the missed facts and buttons down
+    // instead of running into them.
     const panelW = 820;
-    const panelH = 760;
+    const hasPet = companion.hasStarter();
+    const missed = this.getWeakFactsFromHistory().slice(0, 3);
+    const caption = missed.length > 0
+      ? 'These were tricky! Try again to crush them.'
+      : 'So close! One more run.';
+
+    const titleY = 84;
+    const petY = hasPet ? 250 : null;
+    const captionTop = hasPet ? 330 : 160;
+    const captionText = this.add.text(0, 0, caption, style('body', {
+      fontSize: '42px', fill: '#e0e0ef', align: 'center',
+      wordWrap: { width: 620 }
+    })).setOrigin(0.5, 0);
+    const listPitch = 64;
+    const listTop = captionTop + captionText.height + 44;
+    const contentBottom = missed.length > 0
+      ? listTop + (missed.length - 1) * listPitch + 30
+      : captionTop + captionText.height;
+    const btnH = 90;
+    const panelH = Math.ceil(contentBottom + 44 + btnH + 44);
+    const top = -panelH / 2;
+
     const panel = this.add.container(W / 2, H + panelH / 2).setDepth(60);
 
     const bg = this.add.graphics();
@@ -2162,18 +2230,16 @@ export class GameScene extends Phaser.Scene {
     bg.strokeRoundedRect(-panelW / 2, -panelH / 2, panelW, panelH, 32);
     panel.add(bg);
 
-    // Softer headline than the old "Ship Destroyed" — fail screen leads with
-    // encouragement, not punishment.
-    panel.add(this.add.text(0, -panelH / 2 + 76, 'Mission incomplete', style('display', {
-      fontSize: '48px',
+    // Softer headline than the old "Ship Destroyed": the fail screen leads
+    // with encouragement, not punishment.
+    panel.add(this.add.text(0, top + titleY, 'Mission incomplete', style('display', {
+      fontSize: '64px',
       fill: '#ff9a9a',
     })).setOrigin(0.5));
 
-    // Pet rallies on the fail screen: brief slumpSad → bounceHappy.
-    const missed = this.getWeakFactsFromHistory().slice(0, 3);
-    let petY = -panelH / 2 + 240;
-    if (companion.hasStarter()) {
-      const pet = drawCompanion(this, 0, petY, { scale: 1.2 });
+    // Pet rallies on the fail screen: brief slumpSad, then bounceHappy.
+    if (hasPet) {
+      const pet = drawCompanion(this, 0, top + petY, { scale: 1.2 });
       panel.add(pet);
       pet.setScale(0);
       this.tweens.add({
@@ -2197,42 +2263,31 @@ export class GameScene extends Phaser.Scene {
           });
         },
       });
-    } else {
-      // Without a pet, drop the gap so the equation list still feels centered.
-      petY = -panelH / 2 + 160;
     }
 
-    // Caption sits below the pet — uses the missed-facts log to pivot copy.
-    const captionY = petY + 110;
-    const caption = missed.length > 0
-      ? 'These were tricky! Try again to crush them.'
-      : 'So close! One more run.';
-    panel.add(this.add.text(0, captionY, caption, style('body', {
-      fontSize: '26px', fill: '#cfcfe0',
-    })).setOrigin(0.5));
+    // Caption sits below the pet; the missed-facts log pivots the copy.
+    captionText.y = top + captionTop;
+    panel.add(captionText);
 
-    // 1–3 missed equations in display font. Empty list (timeout with no
+    // 1 to 3 missed equations in display font. Empty list (timeout with no
     // misses) just shows the caption above.
-    if (missed.length > 0) {
-      const listTop = captionY + 70;
-      missed.forEach((m, i) => {
-        panel.add(this.add.text(0, listTop + i * 64, `${m.display} = ${m.answer}`, style('display', {
-          fontSize: '40px',
-          fill: '#f7dc6f',
-        })).setOrigin(0.5));
-      });
-    }
+    missed.forEach((m, i) => {
+      panel.add(this.add.text(0, top + listTop + i * listPitch, `${m.display} = ${m.answer}`, style('display', {
+        fontSize: '42px',
+        fill: '#f7dc6f',
+      })).setOrigin(0.5));
+    });
 
-    const btnY = panelH / 2 - 90;
+    const btnY = panelH / 2 - 44 - btnH / 2;
     panel.add(createButton(this, {
-      x: -150, y: btnY, label: 'Try again',
-      width: 280, height: 90,
+      x: -175, y: btnY, label: 'Try again',
+      width: 320, height: btnH,
       color: this.world.accentColor,
       onClick: () => this.scene.restart(),
     }));
     panel.add(createButton(this, {
-      x: 150, y: btnY, label: 'Back to map',
-      width: 280, height: 90,
+      x: 175, y: btnY, label: 'Back to map',
+      width: 320, height: btnH,
       color: 0x4a4a6a,
       onClick: () => this.exitToLevelSelect(),
     }));
@@ -2260,8 +2315,9 @@ export class GameScene extends Phaser.Scene {
     if (this.arcadeMode === 'bossRush' && this.arcadeState) {
       const n = (this.arcadeState.index ?? 0) + 1;
       const total = this.arcadeState.queue?.length ?? 5;
-      this.add.text(W / 2, TOP_BAR_H - 4, `BOSS ${n}/${total}`, style('caption', {
-        fontSize: '26px', fill: '#ff8b8b', fontStyle: '900'
+      this._bossRushCounter = this.add.text(W / 2, TOP_BAR_H + 4, `BOSS ${n}/${total}`, style('caption', {
+        fontSize: '36px', fill: '#ff8b8b', fontStyle: '900',
+        stroke: '#0a0a1a', strokeThickness: 5
       })).setOrigin(0.5, 0).setDepth(45);
     }
   }
@@ -2526,10 +2582,50 @@ export class GameScene extends Phaser.Scene {
     }
 
     const overlay = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0).setDepth(50).setInteractive();
-    this.tweens.add({ targets: overlay, alpha: 0.7, duration: 350 });
+    this.tweens.add({ targets: overlay, fillAlpha: 0.7, duration: 350 });
+
+    // Reward banners (evolved / unlocked / first mastery) stack in their own
+    // lane at the top of the card, each pill sized from its text, and the
+    // card grows by the lane's height so nothing covers the title.
+    const banners = [];
+    if (evolvedTo) {
+      const sp = companion.getSpecies();
+      const lore = sp.stages[evolvedTo];
+      banners.push({ kind: 'evolved', banner: this._makeResultsBanner({
+        text: `EVOLVED: ${lore.name.toUpperCase()}!`,
+        fill: COLORS.accentPurple, ink: '#1a0a26'
+      }) });
+    }
+    if (glitchUnlocked) {
+      banners.push({ kind: 'glitch', banner: this._makeResultsBanner({
+        text: `UNLOCKED: GLITCH MODULE\n+ ${glitchBonus} STARDUST`,
+        fill: 0x39ff14, stroke: 0xff00ff, ink: '#0a0a1a'
+      }) });
+    }
+    if (kingColiUnlocked) {
+      banners.push({ kind: 'kingColi', banner: this._makeResultsBanner({
+        text: `UNLOCKED: AEGIS HULL\n+ ${kingColiBonus} STARDUST`,
+        fill: 0x6b8f3a, stroke: 0xeed25a, ink: '#0a0a1a'
+      }) });
+    }
+    if (firstMastery) {
+      banners.push({ kind: 'mastery', banner: this._makeResultsBanner({
+        text: 'FIRST MASTERY! +5 STARDUST',
+        fill: COLORS.warning, stroke: 0xffae3a, ink: '#1a1208',
+        icon: (g, x) => drawStarIcon(g, x, 0, 16, COLORS.bgPanel, 0xffffff)
+      }) });
+    }
+    const bannerGap = 12;
+    let laneH = 0;
+    if (banners.length) {
+      laneH = 28 + banners.reduce((sum, b) => sum + b.banner.bannerH, 0) + bannerGap * (banners.length - 1) + 4;
+    }
 
     const panelW = 880;
-    const panelH = 980;
+    const panelH = 980 + laneH;
+    // Tall cards (several banners) slide a little lower so they clear the top bar.
+    const panelRestY = Math.max(H / 2, TOP_BAR_H + 20 + panelH / 2);
+    const top = -panelH / 2 + laneH;
     const panel = this.add.container(W / 2, H + panelH / 2).setDepth(60);
 
     const bg = this.add.graphics();
@@ -2539,15 +2635,15 @@ export class GameScene extends Phaser.Scene {
     bg.strokeRoundedRect(-panelW / 2, -panelH / 2, panelW, panelH, 32);
     panel.add(bg);
 
-    panel.add(this.add.text(0, -panelH / 2 + 80, bossWin ? 'Boss Defeated!' : "Time's Up!", style('display', {
+    panel.add(this.add.text(0, top + 80, bossWin ? 'Boss Defeated!' : "Time's Up!", style('display', {
       fontSize: '60px'
     })).setOrigin(0.5));
 
-    panel.add(this.add.text(0, -panelH / 2 + 145, this.modeConfig.label.toUpperCase(), style('caption', {
-      fill: '#cfcfe0', fontSize: '24px'
+    panel.add(this.add.text(0, top + 148, this.modeConfig.label.toUpperCase(), style('caption', {
+      fill: '#cfcfe0', fontSize: '36px', fontStyle: '800'
     })).setOrigin(0.5));
 
-    const starY = -panelH / 2 + 260;
+    const starY = top + 260;
     for (let i = 0; i < 3; i++) {
       const filled = i < stars;
       const star = this.makeStarShape(filled);
@@ -2565,30 +2661,35 @@ export class GameScene extends Phaser.Scene {
       });
     }
 
+    // Stat columns sit 270 apart so the 36px labels (BEST STREAK is the
+    // widest) keep clear air between them.
     const statY = starY + 220;
-    panel.add(this.add.text(-220, statY, this.correctAnswers.toString(), style('display', {
+    const statColX = 270;
+    const statLabelY = statY + 72;
+    const statLabelStyle = style('caption', { fontSize: '36px', fill: '#cfcfe0', fontStyle: '800' });
+    panel.add(this.add.text(-statColX, statY, this.correctAnswers.toString(), style('display', {
       fontSize: '78px',
       fill: '#ffffff'
     })).setOrigin(0.5));
-    panel.add(this.add.text(-220, statY + 60, 'CORRECT', style('caption')).setOrigin(0.5));
+    panel.add(this.add.text(-statColX, statLabelY, 'CORRECT', statLabelStyle).setOrigin(0.5));
 
     panel.add(this.add.text(0, statY, `${accuracy}%`, style('display', {
       fontSize: '78px',
       fill: '#' + this.world.accentColor.toString(16).padStart(6, '0')
     })).setOrigin(0.5));
-    panel.add(this.add.text(0, statY + 60, 'ACCURACY', style('caption')).setOrigin(0.5));
+    panel.add(this.add.text(0, statLabelY, 'ACCURACY', statLabelStyle).setOrigin(0.5));
 
-    panel.add(this.add.text(220, statY, this.bestStreak.toString(), style('display', {
+    panel.add(this.add.text(statColX, statY, this.bestStreak.toString(), style('display', {
       fontSize: '78px',
       fill: '#ff8b3d'
     })).setOrigin(0.5));
-    panel.add(this.add.text(220, statY + 60, 'BEST STREAK', style('caption')).setOrigin(0.5));
+    panel.add(this.add.text(statColX, statLabelY, 'BEST STREAK', statLabelStyle).setOrigin(0.5));
 
     // Summary pet — confetti moment + gentle happy idle. Three-star clears
     // get a rotating star halo behind the pet for extra ceremony.
     if (companion.hasStarter()) {
       const petX = 320;
-      const petY = -260;
+      const petY = top + 230;
       const petScale = 1.6;
 
       // Halo: 8-pointed star shape behind the pet, only on 3-star clears.
@@ -2671,102 +2772,37 @@ export class GameScene extends Phaser.Scene {
       });
     }
 
-    if (evolvedTo) {
-      const banner = this.add.container(0, -panelH / 2 + 30);
-      const bg2 = this.add.graphics();
-      bg2.fillStyle(COLORS.accentPurple, 1);
-      bg2.fillRoundedRect(-320, -32, 640, 64, 32);
-      banner.add(bg2);
-      const sp = companion.getSpecies();
-      const lore = sp.stages[evolvedTo];
-      banner.add(this.add.text(0, 0, `EVOLVED: ${lore.name.toUpperCase()}!`, style('subhead', {
-        fontSize: '26px',
-        fill: '#1a0a26',
-        fontStyle: '900'
-      })).setOrigin(0.5));
+    let laneY = -panelH / 2 + 28;
+    banners.forEach(({ kind, banner }) => {
+      banner.y = laneY + banner.bannerH / 2;
+      laneY += banner.bannerH + bannerGap;
       panel.add(banner);
-    }
-
-    if (glitchUnlocked) {
-      const banner = this.add.container(0, -panelH / 2 + (evolvedTo ? 90 : 30));
-      const bg2 = this.add.graphics();
-      bg2.fillStyle(0x39ff14, 1);
-      bg2.fillRoundedRect(-360, -34, 720, 68, 34);
-      bg2.lineStyle(3, 0xff00ff, 1);
-      bg2.strokeRoundedRect(-360, -34, 720, 68, 34);
-      banner.add(bg2);
-      banner.add(this.add.text(0, 0, `UNLOCKED: GLITCH MODULE + ${glitchBonus} STARDUST`, style('subhead', {
-        fontSize: '24px',
-        fill: '#0a0a1a',
-        fontStyle: '900'
-      })).setOrigin(0.5));
-      panel.add(banner);
+      if (kind === 'evolved') return;
       this.tweens.add({
         targets: banner, scale: { from: 0.6, to: 1 },
         duration: 320, ease: 'Back.easeOut'
       });
-      audio.playGlitchStatic?.({ duration: 0.28, peakGain: 0.15 });
-    }
-
-    if (kingColiUnlocked) {
-      const banner = this.add.container(0, -panelH / 2 + (evolvedTo ? 90 : 30));
-      const bg2 = this.add.graphics();
-      bg2.fillStyle(0x6b8f3a, 1);
-      bg2.fillRoundedRect(-360, -34, 720, 68, 34);
-      bg2.lineStyle(3, 0xeed25a, 1);
-      bg2.strokeRoundedRect(-360, -34, 720, 68, 34);
-      banner.add(bg2);
-      banner.add(this.add.text(0, 0, `UNLOCKED: AEGIS HULL + ${kingColiBonus} STARDUST`, style('subhead', {
-        fontSize: '24px',
-        fill: '#0a0a1a',
-        fontStyle: '900'
-      })).setOrigin(0.5));
-      panel.add(banner);
-      this.tweens.add({
-        targets: banner, scale: { from: 0.6, to: 1 },
-        duration: 320, ease: 'Back.easeOut'
-      });
-      audio.playStardustChime?.();
-    }
-
-    if (firstMastery) {
-      const banner = this.add.container(0, -panelH / 2 + (evolvedTo || glitchUnlocked || kingColiUnlocked ? 90 : 30));
-      const bg2 = this.add.graphics();
-      bg2.fillStyle(COLORS.warning, 1);
-      bg2.fillRoundedRect(-340, -34, 680, 68, 34);
-      bg2.lineStyle(3, 0xffae3a, 1);
-      bg2.strokeRoundedRect(-340, -34, 680, 68, 34);
-      banner.add(bg2);
-      const starG = this.add.graphics();
-      drawStarIcon(starG, -290, 0, 16, COLORS.bgPanel, 0xffffff);
-      banner.add(starG);
-      banner.add(this.add.text(0, 0, 'FIRST MASTERY! +5 STARDUST', style('subhead', {
-        fontSize: '26px',
-        fill: '#1a1208',
-        fontStyle: '900'
-      })).setOrigin(0.5));
-      panel.add(banner);
-
-      // Extra confetti burst from the banner area
-      this.tweens.add({
-        targets: banner, scale: { from: 0.6, to: 1 },
-        duration: 320, ease: 'Back.easeOut'
-      });
-      audio.playStar?.();
-      this.time.delayedCall(180, () => audio.playStar?.());
-      this.time.delayedCall(360, () => audio.playStar?.());
-    }
+      if (kind === 'glitch') {
+        audio.playGlitchStatic?.({ duration: 0.28, peakGain: 0.15 });
+      } else if (kind === 'kingColi') {
+        audio.playStardustChime?.();
+      } else if (kind === 'mastery') {
+        audio.playStar?.();
+        this.time.delayedCall(180, () => audio.playStar?.());
+        this.time.delayedCall(360, () => audio.playStar?.());
+      }
+    });
 
     const btnY = panelH / 2 - 110;
 
     // Stardust earned — pill chip with animated counter.
     if (this.stardustEarned > 0) {
-      const dustY = btnY - 200;
+      const dustY = btnY - 214;
       const total = this.stardustEarned;
 
       // Width is sized for the final value so the chip doesn't reflow mid-tween.
       const finalLabel = this.add.text(0, 0, `+${total} STARDUST`, style('subhead', {
-        fontSize: '34px', fill: '#ffffff', fontStyle: '900',
+        fontSize: '36px', fill: '#ffffff', fontStyle: '900',
         stroke: '#0a0a18', strokeThickness: 3
       })).setOrigin(0, 0.5);
       const finalLabelW = finalLabel.width;
@@ -2808,7 +2844,7 @@ export class GameScene extends Phaser.Scene {
       chip.add(iconG);
 
       const labelObj = this.add.text(groupLeft + iconBoxW + gap, 0, `+0 STARDUST`, style('subhead', {
-        fontSize: '34px', fill: '#ffffff', fontStyle: '900',
+        fontSize: '36px', fill: '#ffffff', fontStyle: '900',
         stroke: '#0a0a18', strokeThickness: 3
       })).setOrigin(0, 0.5);
       chip.add(labelObj);
@@ -2817,10 +2853,10 @@ export class GameScene extends Phaser.Scene {
       const bonusLines = [];
       if (masteryBonus > 0) bonusLines.push({ text: `+${masteryBonus} first mastery`, color: '#f7dc6f' });
       if (dailyBonus > 0)   bonusLines.push({ text: `+${dailyBonus} welcome back!`,   color: '#9be8a3' });
-      const bonusContainer = this.add.container(0, chipH / 2 + 24);
+      const bonusContainer = this.add.container(0, chipH / 2 + 30);
       bonusLines.forEach((bl, i) => {
-        const t = this.add.text(0, i * 28, bl.text, style('caption', {
-          fontSize: '20px', fill: bl.color, fontStyle: '900'
+        const t = this.add.text(0, i * 46, bl.text, style('caption', {
+          fontSize: '36px', fill: bl.color, fontStyle: '900'
         })).setOrigin(0.5);
         t.alpha = 0;
         bonusContainer.add(t);
@@ -2874,10 +2910,47 @@ export class GameScene extends Phaser.Scene {
 
     this.tweens.add({
       targets: panel,
-      y: H / 2,
+      y: panelRestY,
       duration: 500,
       ease: 'Back.easeOut'
     });
+  }
+
+  // A results reward pill sized from its text: up to 800 wide, wrapping to
+  // more lines when needed. `icon(g, x)` draws an optional glyph left of the
+  // text. Returns the container with its height on `bannerH`.
+  _makeResultsBanner({ text, fill, stroke = null, ink, icon = null }) {
+    const maxW = 800;
+    const padX = 36;
+    const padY = 14;
+    const iconW = icon ? 48 : 0;
+    const label = this.add.text(0, 0, text, style('subhead', {
+      fontSize: '36px', fill: ink, fontStyle: '900', align: 'center',
+      wordWrap: { width: maxW - padX * 2 - iconW }
+    })).setOrigin(0, 0.5);
+    const contentW = iconW + Math.ceil(label.width);
+    const w = Math.min(maxW, contentW + padX * 2);
+    const h = Math.ceil(label.height) + padY * 2;
+    const r = Math.min(34, h / 2);
+    const c = this.add.container(0, 0);
+    const g = this.add.graphics();
+    g.fillStyle(fill, 1);
+    g.fillRoundedRect(-w / 2, -h / 2, w, h, r);
+    if (stroke !== null) {
+      g.lineStyle(3, stroke, 1);
+      g.strokeRoundedRect(-w / 2, -h / 2, w, h, r);
+    }
+    c.add(g);
+    const left = -contentW / 2;
+    if (icon) {
+      const ig = this.add.graphics();
+      icon(ig, left + 18);
+      c.add(ig);
+    }
+    label.x = left + iconW;
+    c.add(label);
+    c.bannerH = h;
+    return c;
   }
 
   makeStarShape(filled) {
@@ -3085,7 +3158,7 @@ export class GameScene extends Phaser.Scene {
       x: 0, y: -160, width: 420, height: 88,
       label: 'Resume',
       color: 0x39ff14,
-      textOverrides: { fontSize: '30px', fill: '#0a0a1a', fontStyle: '900' },
+      textOverrides: { fontSize: '42px', fill: '#0a0a1a', fontStyle: '900' },
       onClick: () => close()
     }));
 
@@ -3096,20 +3169,22 @@ export class GameScene extends Phaser.Scene {
       if (soundBtn) soundBtn.destroy();
       if (musicBtn) musicBtn.destroy();
       soundBtn = createButton(this, {
-        x: 0, y: -50, width: 420, height: 80,
+        x: 0, y: -52, width: 420, height: 88,
         label: labelFor(audio.enabled, 'Sound'),
         color: audio.enabled ? 0xb6e0ff : 0x4a4a5a,
-        textOverrides: { fontSize: '26px', fill: '#0a0a1a', fontStyle: '900' },
+        // No fill: createButton picks dark ink on the light ON face and white
+        // on the gray OFF face, so both states stay readable.
+        textOverrides: { fontSize: '42px', fontStyle: '900' },
         onClick: () => {
           audio.setEnabled?.(!audio.enabled);
           rebuild();
         }
       });
       musicBtn = createButton(this, {
-        x: 0, y: 50, width: 420, height: 80,
+        x: 0, y: 56, width: 420, height: 88,
         label: labelFor(music.enabled, 'Music'),
         color: music.enabled ? 0xc77eff : 0x4a4a5a,
-        textOverrides: { fontSize: '26px', fill: '#0a0a1a', fontStyle: '900' },
+        textOverrides: { fontSize: '42px', fontStyle: '900' },
         onClick: () => {
           music.setEnabled?.(!music.enabled);
           rebuild();
@@ -3124,7 +3199,7 @@ export class GameScene extends Phaser.Scene {
       x: 0, y: 180, width: 420, height: 88,
       label: 'Quit to Map',
       color: 0xff5b6e,
-      textOverrides: { fontSize: '30px', fill: '#ffffff', fontStyle: '900' },
+      textOverrides: { fontSize: '42px', fill: '#ffffff', fontStyle: '900' },
       onClick: () => {
         resumeAll();
         close();
@@ -3178,6 +3253,7 @@ export class GameScene extends Phaser.Scene {
     for (let i = 0; i < 3; i++) {
       const q = this.add.text(0, 0, '?', style('display', {
         fontSize: '54px',
+        art: true,
         fill: '#ff00ff',
         stroke: '#0a0a1a',
         strokeThickness: 4
@@ -3390,14 +3466,14 @@ export class GameScene extends Phaser.Scene {
       bg.lineStyle(5, 0xff00ff, 1);
       bg.strokeRoundedRect(-440, -120, 880, 240, 24);
       banner.add(bg);
-      banner.add(this.add.text(0, -40, 'WARP ACTIVATED', style('display', {
-        fontSize: '54px',
+      banner.add(this.add.text(0, -42, 'WARP ACTIVATED', style('display', {
+        fontSize: '64px',
         fill: '#ff00ff',
         stroke: '#0a0a1a',
         strokeThickness: 5
       })).setOrigin(0.5));
-      banner.add(this.add.text(0, 40, `→  ${destName}`, style('subhead', {
-        fontSize: '40px',
+      banner.add(this.add.text(0, 46, `→  ${destName}`, style('subhead', {
+        fontSize: '42px',
         fill: '#ffffff'
       })).setOrigin(0.5));
       banner.setScale(0.5);

@@ -1,17 +1,30 @@
 import Phaser from 'phaser';
 import { audio } from './AudioManager.js';
-import { style } from './textStyles.js';
+import { style, TYPE } from './textStyles.js';
 import { COLORS } from './colorPalette.js';
+
+// Pick whichever lettering, near-black or white, has more contrast against the
+// button face (WCAG contrast ratio), so a label is never white on a pastel or
+// mid-bright accent like orange.
+function inkFor(color) {
+  const lin = c => { c /= 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
+  const lum = hex => 0.2126 * lin((hex >> 16) & 0xff) + 0.7152 * lin((hex >> 8) & 0xff) + 0.0722 * lin(hex & 0xff);
+  const face = lum(color);
+  const vsWhite = 1.05 / (face + 0.05);
+  const vsDark = (face + 0.05) / (lum(0x0a0a1a) + 0.05);
+  return vsDark > vsWhite ? '#0a0a1a' : '#ffffff';
+}
 
 // Standard rounded-rect button. Returns the container.
 // onClick fires on pointerdown.
+// Every label is at least TYPE.button, and the button grows to fit its label
+// rather than letting the label shrink. Callers still set the fill if they
+// want a particular ink.
 export function createButton(scene, opts) {
   const {
     x = 0,
     y = 0,
     label = '',
-    width = 280,
-    height = 80,
     color = COLORS.accentTeal,
     textStyle = 'subhead',
     textOverrides = {},
@@ -19,8 +32,18 @@ export function createButton(scene, opts) {
     enabled = true,
     radius = 18
   } = opts;
+  let { width = 280, height = 80 } = opts;
 
   const container = scene.add.container(x, y);
+
+  const labelStyle = style(textStyle, {
+    ...(textOverrides.fill ? {} : { fill: enabled ? inkFor(color) : '#ffffff' }),
+    ...textOverrides
+  });
+  if (parseFloat(labelStyle.fontSize) < TYPE.button) labelStyle.fontSize = `${TYPE.button}px`;
+  const text = scene.add.text(0, 0, label, labelStyle).setOrigin(0.5);
+  width = Math.min(1040, Math.max(width, Math.ceil(text.width) + 64));
+  height = Math.max(height, Math.ceil(text.height) + 24);
 
   const shadow = scene.add.graphics();
   shadow.fillStyle(0x000000, 0.45);
@@ -31,7 +54,6 @@ export function createButton(scene, opts) {
   drawButtonFace(bg, width, height, radius, color, enabled);
   container.add(bg);
 
-  const text = scene.add.text(0, 0, label, style(textStyle, textOverrides)).setOrigin(0.5);
   if (!enabled) text.setAlpha(0.5);
   container.add(text);
 

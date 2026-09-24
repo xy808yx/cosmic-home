@@ -6,13 +6,13 @@
 // the SAME per-fact status the parent dashboard grid does (progress.getFactStatus)
 // plus the spaced-repetition rust signal (progress.getRustyFacts), so it never
 // invents its own pedagogy:
-//   • automatic  → a bright open BLOOM (gold)        — fast + accurate
-//   • slow       → a green SPROUT (two leaves)       — accurate but not yet fast
-//   • inaccurate → a small BUD (amber / red)         — still being learned
-//   • unseen     → bare SOIL                          — not planted yet
-//   • rusty      → a wilted, dimmed bloom            — automatic but overdue for review
+//   • automatic  → a bright open BLOOM (gold)        means fast + accurate
+//   • slow       → a green SPROUT (two leaves)       means accurate but not yet fast
+//   • inaccurate → a small BUD (amber / red)         means still being learned
+//   • unseen     → bare SOIL                         means not planted yet
+//   • rusty      → a wilted, dimmed bloom            means automatic but overdue for review
 //
-// Non-interactive. Plain shapes only (4 cardinal petals — no radial mandala /
+// Non-interactive. Plain shapes only (4 cardinal petals, no radial mandala /
 // spiral / sunburst), per the project content rule. Returns a Container centred
 // on (x, y); the caller positions and depths it.
 
@@ -92,27 +92,22 @@ function tileStatus(a, b) {
 }
 
 export function drawMasteryWall(scene, x, y, opts = {}) {
-  const cell = opts.cell ?? 46;
+  // Callers may still pass the old 46px cell. 52 is the smallest cell that
+  // holds a readable "12" axis number, so a smaller request is lifted to it.
+  const cell = Math.max(opts.cell ?? 52, 52);
   const title = opts.title ?? 'Mastery Garden';
   const accent = opts.accent ?? 0xffd27a;
 
   const gridW = 12 * cell;
-  const padX = 40;
-  const headTop = 96;        // title + column numbers
-  const legendH = 56;
+  const padX = 64;           // room for the row numbers left of the grid
   const panelW = gridW + padX * 2 + 28;
-  const panelH = headTop + gridW + 36 + legendH;
+  const textW = panelW - 48; // widest a header line may run inside the border
 
   const cont = scene.add.container(x, y);
 
-  // Panel.
+  // Panel. Added first so it sits under everything; drawn once the measured
+  // text below has set the panel height.
   const bg = scene.add.graphics();
-  bg.fillStyle(0x000000, 0.45);
-  bg.fillRoundedRect(-panelW / 2 + 4, -panelH / 2 + 6, panelW, panelH, 26);
-  bg.fillStyle(0x1d1830, 0.98);
-  bg.fillRoundedRect(-panelW / 2, -panelH / 2, panelW, panelH, 26);
-  bg.lineStyle(3, accent, 0.85);
-  bg.strokeRoundedRect(-panelW / 2, -panelH / 2, panelW, panelH, 26);
   cont.add(bg);
 
   // Count automatic / rusty for the subtitle.
@@ -120,28 +115,80 @@ export function drawMasteryWall(scene, x, y, opts = {}) {
   const rustySet = new Set(rustyList.map(f => factKey(f.a, f.b)));
   const stats = progress.getAutomaticityStats();
 
-  cont.add(scene.add.text(0, -panelH / 2 + 34, title, style('display', {
-    fontSize: '40px', fill: '#ffe6b0'
-  })).setOrigin(0.5));
+  const titleText = scene.add.text(0, 0, title, style('display', {
+    fill: '#ffe6b0'
+  })).setOrigin(0.5, 0);
   const sub = stats.attempted === 0
     ? 'Plant your first bloom. Keep playing!'
-    : `${stats.automatic} blooms open` + (rustySet.size ? `  ·  ${rustySet.size} need water` : '');
-  cont.add(scene.add.text(0, -panelH / 2 + 70, sub, style('caption', {
-    fontSize: '22px', fill: '#cfcfe0'
-  })).setOrigin(0.5));
+    : `${stats.automatic} ${stats.automatic === 1 ? 'bloom' : 'blooms'} open`
+      + (rustySet.size ? `  ·  ${rustySet.size} ${rustySet.size === 1 ? 'needs' : 'need'} water` : '');
+  const subText = scene.add.text(0, 0, sub, style('body', {
+    fill: '#cfcfe0', align: 'center'
+  })).setOrigin(0.5, 0);
+  if (subText.width > textW) {
+    // Too wide for one line: break between its two parts, never mid-phrase,
+    // then wrap as a last resort.
+    subText.setText(sub.replace(/\.\s+/, '.\n').replace(/\s+·\s+/, '\n'));
+    subText.setWordWrapWidth(textW);
+  }
+  cont.add([titleText, subText]);
+
+  // Column + row numbers: the grid's axis, lettered at 32px (art) like the
+  // fact grids elsewhere, in the readable gray.
+  const axisStyle = style('caption', { fontSize: '32px', fill: '#cfcfe0', art: true });
+  const colNums = [];
+  const rowNums = [];
+  for (let i = 1; i <= 12; i++) {
+    colNums.push(scene.add.text(0, 0, i.toString(), axisStyle).setOrigin(0.5));
+    rowNums.push(scene.add.text(0, 0, i.toString(), axisStyle).setOrigin(0.5));
+  }
+  cont.add(colNums);
+  cont.add(rowNums);
+
+  // Legend labels, measured so the 2x2 legend can be sized to them. Each key
+  // is the tile it names (kind, rusty), so the bloom and the bud read apart by
+  // shape on a phone, not only by their close gold and orange.
+  const items = [
+    ['automatic', false, 'Automatic'],
+    ['slow', false, 'Almost'],
+    ['inaccurate', false, 'Learning'],
+    ['automatic', true, 'Needs water']
+  ];
+  const legendTexts = items.map(([, , label]) => scene.add.text(0, 0, label, style('caption', {
+    fill: '#cfcfe0'
+  })).setOrigin(0, 0.5));
+  cont.add(legendTexts);
+
+  // Vertical rhythm, all from the measured text heights. The subtitle hugs the
+  // title; a wider gap under it keeps it from reading as part of the axis row.
+  const padTop = 30;
+  const axisH = colNums[0].height;
+  const titleY = padTop;
+  const subY = titleY + titleText.height + 6;
+  const headTop = subY + subText.height + 24 + axisH + 4; // top of the grid
+  const legendPitch = Math.max(...legendTexts.map(t => t.height)) + 14;
+  const legendTop = headTop + gridW + 28;
+  const panelH = legendTop + legendPitch * 2 + 24;
+
+  bg.fillStyle(0x000000, 0.45);
+  bg.fillRoundedRect(-panelW / 2 + 4, -panelH / 2 + 6, panelW, panelH, 26);
+  bg.fillStyle(0x1d1830, 0.98);
+  bg.fillRoundedRect(-panelW / 2, -panelH / 2, panelW, panelH, 26);
+  bg.lineStyle(3, accent, 0.85);
+  bg.strokeRoundedRect(-panelW / 2, -panelH / 2, panelW, panelH, 26);
+
+  titleText.setY(-panelH / 2 + titleY);
+  subText.setY(-panelH / 2 + subY);
 
   // Grid origin (top-left of the first cell centre row/col).
   const gridLeft = -gridW / 2;
   const gridTop = -panelH / 2 + headTop;
 
-  // Column + row headers.
+  // Column numbers sit just above the grid; row numbers centre in the left gutter.
+  const rowNumX = gridLeft - (padX + 14) / 2 + 4;
   for (let i = 1; i <= 12; i++) {
-    cont.add(scene.add.text(gridLeft + (i - 0.5) * cell, gridTop - 14, i.toString(), style('caption', {
-      fontSize: '15px', fill: '#7a7a90'
-    })).setOrigin(0.5));
-    cont.add(scene.add.text(gridLeft - 18, gridTop + (i - 0.5) * cell, i.toString(), style('caption', {
-      fontSize: '15px', fill: '#7a7a90'
-    })).setOrigin(0.5));
+    colNums[i - 1].setPosition(gridLeft + (i - 0.5) * cell, gridTop - 4 - axisH / 2);
+    rowNums[i - 1].setPosition(rowNumX, gridTop + (i - 0.5) * cell);
   }
 
   // The garden itself.
@@ -157,21 +204,22 @@ export function drawMasteryWall(scene, x, y, opts = {}) {
   }
   cont.add(g);
 
-  // Legend.
-  const legendY = gridTop + gridW + 34;
-  const items = [[BLOOM, 'Automatic'], [SPROUT, 'Almost'], [BUD, 'Learning'], [PETAL_DIM, 'Needs water']];
-  const colW = 150;
-  let lx = -((items.length * colW) / 2) + 28;
-  const swatches = scene.add.graphics(); // one batched draw for all four swatches
-  cont.add(swatches);
-  for (const [color, label] of items) {
-    swatches.fillStyle(color, 1);
-    swatches.fillCircle(lx, legendY, 9);
-    cont.add(scene.add.text(lx + 18, legendY, label, style('caption', {
-      fontSize: '18px', fill: '#cfcfe0'
-    })).setOrigin(0, 0.5));
-    lx += colW;
-  }
+  // Legend: two rows of two, read left to right. Each column is as wide as its
+  // longest label, and the pair is centred under the grid.
+  const keyCell = 46;              // key tile size, a touch smaller than the legend row
+  const keyGap = 14;               // key tile edge to label
+  const colGap = 64;               // between the two legend columns
+  const colWidth = c => keyCell + keyGap + Math.max(legendTexts[c].width, legendTexts[c + 2].width);
+  const colX = [0, colWidth(0) + colGap];
+  const legendLeft = -(colX[1] + colWidth(1)) / 2;
+  const keys = scene.add.graphics(); // one batched draw for all four key tiles
+  cont.addAt(keys, cont.getIndex(legendTexts[0]));
+  items.forEach(([kind, rusty], i) => {
+    const lx = legendLeft + colX[i % 2];
+    const ly = -panelH / 2 + legendTop + legendPitch * (Math.floor(i / 2) + 0.5);
+    drawTile(keys, lx + keyCell / 2, ly, keyCell, kind, false, rusty);
+    legendTexts[i].setPosition(lx + keyCell + keyGap, ly);
+  });
 
   cont.panelW = panelW;
   cont.panelH = panelH;

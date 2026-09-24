@@ -45,6 +45,9 @@ const BOSS_INTRO_CONFIG = {
     fontSize: '52px',
     startX: -W * 0.5,
     endX: W / 2,
+    // Top edge, relative to screen center: below the boss art's feet, legs
+    // and rays, and below the last impact bar.
+    yOffset: 262,
   },
   name: {
     fontSize: '170px',
@@ -164,7 +167,9 @@ export function playBossIntro(scene, worldId, onDone) {
     silhouette.add(body);
     silhouette.setScale(BOSS_INTRO_CONFIG.silhouette.scaleFrom);
     silhouette.setAlpha(0);
-    root.add(silhouette);
+    // Slot the art in under the name and epithet (added earlier) so a boss's
+    // feet, teeth or rays never draw over its title lines.
+    root.addAt(silhouette, root.getIndex(nameShadow));
     scene.tweens.add({
       targets: silhouette,
       alpha: 1,
@@ -207,17 +212,21 @@ export function playBossIntro(scene, worldId, onDone) {
   }));
 
   // ── Layer: epithet slides in from the left ───────────────────────────────
-  const epithetText = scene.add.text(BOSS_INTRO_CONFIG.epithet.startX, H / 2 + 220, epithet, style('subhead', {
+  // Top-anchored under the silhouette so a wrapped second line grows
+  // downward, away from the boss art.
+  const epithetText = scene.add.text(BOSS_INTRO_CONFIG.epithet.startX, H / 2 + BOSS_INTRO_CONFIG.epithet.yOffset, epithet, style('subhead', {
     fontSize: BOSS_INTRO_CONFIG.epithet.fontSize, fill: '#ff2236', fontStyle: '900',
     stroke: '#0a0000', strokeThickness: 4, letterSpacing: 4,
-  })).setOrigin(0.5);
+    align: 'center', wordWrap: { width: W - 120 },
+  })).setOrigin(0.5, 0);
   epithetText.alpha = 0;
   root.add(epithetText);
 
-  // Long epithets auto-shrink horizontally to fit the canvas (mirrors the boss
-  // name above). Some Chapter 2 epithets are long — e.g. W26 "SWARM MOTHER,
-  // QUEEN OF THE WIGGLY SNIFFLES" — and would otherwise bleed off both edges.
-  // The slide-in tween only animates x/alpha, so this scaleX persists.
+  // Long epithets (some Chapter 2 ones, e.g. W26 "SWARM MOTHER, QUEEN OF THE
+  // WIGGLY SNIFFLES") wrap to a second line at full size instead of being
+  // squeezed. If a line still runs wide, shrink horizontally to fit the
+  // canvas as a last resort. The slide-in tween only animates x/alpha, so
+  // this scaleX persists.
   epithetText.scaleX = Math.min(1, (W - 80) / epithetText.width);
 
   timers.push(scene.time.delayedCall(BOSS_INTRO_CONFIG.epithet.appearAt, () => {

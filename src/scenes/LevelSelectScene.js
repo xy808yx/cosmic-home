@@ -132,7 +132,7 @@ export class LevelSelectScene extends Phaser.Scene {
     });
 
     const desc = this.add.text(W / 2, 800, this.world.description, style('subhead', {
-      fontSize: '40px',
+      fontSize: '42px',
       fill: '#e8e8f0',
       align: 'center',
       wordWrap: { width: W - 120 }
@@ -187,6 +187,10 @@ export class LevelSelectScene extends Phaser.Scene {
     // Conveyor by the owner flag (NOT a Ch3 'sort' world, which is natively a belt
     // and needs no surprise-signal). Used to label the card so it's not a surprise.
     const isPilotBelt = !isBoss && this.world.kind !== 'sort' && usesConveyorScene(this.world, modeKey);
+    // A card with a 36px line under its title (the boss's villain name, or the
+    // pilot belt verb) lifts its title and rule so that line clears the stars.
+    const hasSubline = isBoss || isPilotBelt;
+    const ruleY = hasSubline ? -18 : 6;
 
     // Drop shadow
     const shadow = this.add.graphics();
@@ -202,27 +206,26 @@ export class LevelSelectScene extends Phaser.Scene {
     card.strokeRoundedRect(-w / 2, -h / 2, w, h, 24);
     c.add(card);
 
-    // Polish: faint accent wash in the upper section
+    // Polish: faint accent wash in the upper section, ending just above the rule
     const accentWash = this.add.graphics();
     accentWash.fillStyle(accent, isLocked ? 0.04 : 0.10);
-    accentWash.fillRoundedRect(-w / 2 + 10, -h / 2 + 10, w - 20, h * 0.46, 16);
+    accentWash.fillRoundedRect(-w / 2 + 10, -h / 2 + 10, w - 20, ruleY - 5 + h / 2 - 10, 16);
     c.add(accentWash);
 
     // Polish: thin accent rule under the title block
-    const ruleY = isBoss ? 14 : 6;
     const ruleG = this.add.graphics();
     ruleG.fillStyle(accent, isLocked ? 0.25 : 0.55);
     ruleG.fillRect(-w / 2 + 60, ruleY, w - 120, 2);
     c.add(ruleG);
 
     // ---- Title row: icon + label, centered as a unit ------------------------
-    const titleY = isBoss ? -h / 4 - 8 : -h / 4 + 8;
+    const titleY = hasSubline ? -h / 4 - 9 : -h / 4 + 8;
     const labelStr = isBoss ? 'BOSS' : MODES[modeKey].label.toUpperCase();
     const iconBoxW = 64;
-    const gap = 22;
+    const gap = 18;
 
     const labelObj = this.add.text(0, 0, labelStr, style('display', {
-      fontSize: '46px',
+      fontSize: '52px',
       fill: '#ffffff',
       fontStyle: '900'
     })).setOrigin(0, 0.5);
@@ -244,20 +247,23 @@ export class LevelSelectScene extends Phaser.Scene {
     labelObj.y = titleY;
     c.add(labelObj);
 
+    const sublineY = 14;
+    let villainText = null;
     if (isBoss) {
-      c.add(this.add.text(0, 32, this.world.villain || 'BOSS', style('subhead', {
-        fontSize: '28px',
+      villainText = this.add.text(0, sublineY, this.world.villain || 'BOSS', style('subhead', {
+        fontSize: '36px',
         fill: '#ff8b8b',
         fontStyle: '900'
-      })).setOrigin(0.5));
+      })).setOrigin(0.5);
+      c.add(villainText);
     }
 
     // Pilot signal (Ch1/Ch2 only — on Ch3 every level is already a belt): show the
     // chapter's sort verb so tapping "MIXED" → a conveyor isn't a silent surprise.
     if (isPilotBelt) {
       const verb = CONVEYOR_CHAPTER[this.world.chapter || 1]?.copy.title || 'SORT & SHIP';
-      c.add(this.add.text(0, 30, verb, style('subhead', {
-        fontSize: '24px', fill: hexStr(accent), fontStyle: '900'
+      c.add(this.add.text(0, sublineY, verb, style('subhead', {
+        fontSize: '36px', fill: hexStr(accent), fontStyle: '900'
       })).setOrigin(0.5));
     }
 
@@ -283,13 +289,14 @@ export class LevelSelectScene extends Phaser.Scene {
     // toward unlocking the next world. Distinct from the star row, which just
     // shows the best result.
     if (mastered && !isLocked) {
-      const bx = -w / 2 + 44;
-      const by = -h / 2 + 40;
+      // Tucked into the corner so it stays clear of the 52px title's glyph.
+      const bx = -w / 2 + 32;
+      const by = -h / 2 + 32;
       const badge = this.add.graphics();
       badge.fillStyle(COLORS.warning, 1);
-      badge.fillCircle(bx, by, 26);
+      badge.fillCircle(bx, by, 24);
       badge.lineStyle(3, 0xffffff, 0.9);
-      badge.strokeCircle(bx, by, 26);
+      badge.strokeCircle(bx, by, 24);
       badge.lineStyle(5, COLORS.bgDark, 1);
       badge.beginPath();
       badge.moveTo(bx - 11, by + 1);
@@ -315,6 +322,12 @@ export class LevelSelectScene extends Phaser.Scene {
       overlay.fillStyle(0x000000, 0.5);
       overlay.fillRoundedRect(-w / 2, -h / 2, w, h, 24);
       c.add(overlay);
+      // The villain's name stays readable over the lock shade: it sits above
+      // the overlay, only slightly dimmed, instead of at half strength.
+      if (villainText) {
+        c.bringToTop(villainText);
+        villainText.setAlpha(0.8);
+      }
     }
 
     if (!isLocked) {
@@ -359,8 +372,11 @@ export class LevelSelectScene extends Phaser.Scene {
     }
   }
 
+  // The footer starts higher than it used to (1496, was 1560) so the 52px
+  // heading, the 64px bar and the 42px lines below it all end above the bottom
+  // edge, even when the course hint wraps to two lines.
   createMasteryFooter() {
-    const y = 1560;
+    const y = 1496;
     let masterySum = 0;
     let count = 0;
     for (let t = 1; t <= 12; t++) {
@@ -373,14 +389,15 @@ export class LevelSelectScene extends Phaser.Scene {
     const avg = count > 0 ? Math.round(masterySum / count) : 0;
 
     this.inkForSky(this.add.text(W / 2, y, 'FACT MASTERY', style('subhead', {
-      fontSize: '44px',
+      fontSize: '52px',
       fill: '#cfcfe0',
       fontStyle: '900'
     })).setOrigin(0.5).setDepth(11));
 
+    // 64px tall so the 42px percent label sits inside the bar.
     const barW = 820;
-    const barH = 56;
-    const barY = y + 90;
+    const barH = 64;
+    const barY = y + 84;
     const fillColor = avg >= 70 ? COLORS.success : avg >= 40 ? this.world.accentColor : COLORS.error;
 
     createProgressBar(this, {
@@ -391,13 +408,16 @@ export class LevelSelectScene extends Phaser.Scene {
       ratio: avg / 100,
       color: fillColor,
       label: `${avg}%`,
+      labelOverrides: { fontSize: '42px' },
       depth: 11
     });
 
     const totalStars = Object.values(this.worldProgress.levelStars).reduce((s, v) => s + v, 0);
-    this.inkForSky(this.add.text(W / 2, barY + barH / 2 + 60, `${totalStars} / 12 stars in ${this.world.name}`, style('subhead', {
-      fontSize: '34px',
-      fill: '#aaaac0'
+    this.inkForSky(this.add.text(W / 2, barY + barH / 2 + 48, `${totalStars} / 12 stars in ${this.world.name}`, style('subhead', {
+      fontSize: '42px',
+      fill: '#cfcfe0',
+      align: 'center',
+      wordWrap: { width: W - 120 }
     })).setOrigin(0.5).setDepth(11));
 
     // Advance status — the brake made visible. While the next world is still
@@ -409,20 +429,23 @@ export class LevelSelectScene extends Phaser.Scene {
     if (nextWorld && !progress.isWorldUnlocked(nextId)) {
       const mastered = progress.getMasteredLevelCount(this.world.id);
       const need = this.world.levelsRequired;
-      // Raised a touch so the 2nd line (which wraps for long world names like
-      // "The Singularity Cell") keeps a comfortable margin above the 1920 bottom.
+      // The hint hangs from the line above it (origin top), so when a long
+      // world name wraps it to a 2nd line it grows down, still above 1920.
+      // Non-breaking spaces keep the destination's name whole when it wraps
+      // ("...a course to" / "The Big Garden", not "...to The" / "Big Garden").
       const ay = barY + barH / 2 + 112;
-      this.inkForSky(this.add.text(W / 2, ay, `${mastered} / ${need} missions mastered`, style('subhead', {
-        fontSize: '38px',
+      const nextName = nextWorld.name.replace(/ /g, ' ');
+      const masteredLine = this.inkForSky(this.add.text(W / 2, ay, `${mastered} / ${need} missions mastered`, style('subhead', {
+        fontSize: '42px',
         fill: mastered >= need ? '#9affc0' : '#ffd479',
         fontStyle: '900'
       })).setOrigin(0.5).setDepth(11));
-      this.inkForSky(this.add.text(W / 2, ay + 50,
-        `Master every mission to chart a course to ${nextWorld.name}`,
+      this.inkForSky(this.add.text(W / 2, ay + masteredLine.height / 2 + 6,
+        `Master every mission to chart a course to ${nextName}`,
         style('subhead', {
-          fontSize: '30px', fill: '#cfcfe0', align: 'center',
-          wordWrap: { width: W - 160 }
-        })).setOrigin(0.5).setDepth(11));
+          fontSize: '42px', fill: '#cfcfe0', align: 'center',
+          wordWrap: { width: W - 120 }
+        })).setOrigin(0.5, 0).setDepth(11));
     }
   }
 

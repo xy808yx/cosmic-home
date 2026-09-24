@@ -57,9 +57,8 @@ export class DevMenuScene extends Phaser.Scene {
       strokeThickness: 4
     })).setOrigin(0.5);
 
-    this.add.text(W / 2, 220, '(shh, kids can\'t see this)', style('caption', {
-      fontSize: '22px',
-      fill: '#9a9aae'
+    this.add.text(W / 2, 220, '(shh, kids can\'t see this)', style('body', {
+      fill: '#cfcfe0'
     })).setOrigin(0.5);
 
     const buttons = [
@@ -134,19 +133,23 @@ export class DevMenuScene extends Phaser.Scene {
       {
         label: 'Back to map',
         color: 0x4a4a6a,
+        // Dark ink is unreadable on this gray.
+        ink: '#ffffff',
         onClick: () => new TransitionManager(this).fadeToScene('WorldMapScene')
       }
     ];
 
+    // 900 wide so the longest label (the conveyor pilot line) fits at button
+    // size and every button in the stack stays the same width.
     const startY = 380;
     const gap = 130;
     buttons.forEach((b, i) => {
       createButton(this, {
         x: W / 2, y: startY + i * gap,
         label: b.label,
-        width: 680, height: 100,
+        width: 900, height: 100,
         color: b.color,
-        textOverrides: { fontSize: '28px', fill: '#0a0a1a', fontStyle: '900' },
+        textOverrides: { fontSize: '42px', fill: b.ink || '#0a0a1a', fontStyle: '900' },
         onClick: () => {
           if (this.time.now < readyAt) return;
           audio.playClick?.();
@@ -157,7 +160,7 @@ export class DevMenuScene extends Phaser.Scene {
   }
 
   juiceItUp() {
-    // Default to Ember if no species picked — needed for 'adult' stage to render.
+    // Default to Ember if no species picked; needed for 'adult' stage to render.
     if (!progress.companion.speciesId) {
       progress.companion.speciesId = 'ember';
     }
@@ -182,16 +185,21 @@ export class DevMenuScene extends Phaser.Scene {
 
   flashToast(text) {
     const toast = this.add.container(W / 2, H - 200).setDepth(70);
+    const label = this.add.text(0, 0, text, style('subhead', {
+      fontSize: '42px',
+      fill: '#ff00ff',
+      align: 'center',
+      wordWrap: { width: 940, useAdvancedWrap: true }
+    })).setOrigin(0.5);
+    // The box is sized from the text, so a long message never spills out.
+    const bw = Math.ceil(label.width) + 64;
+    const bh = Math.ceil(label.height) + 32;
     const bg = this.add.graphics();
     bg.fillStyle(0x0a0a1a, 0.95);
-    bg.fillRoundedRect(-260, -36, 520, 72, 16);
+    bg.fillRoundedRect(-bw / 2, -bh / 2, bw, bh, 16);
     bg.lineStyle(2, 0xff00ff, 0.95);
-    bg.strokeRoundedRect(-260, -36, 520, 72, 16);
-    toast.add(bg);
-    toast.add(this.add.text(0, 0, text, style('subhead', {
-      fontSize: '26px',
-      fill: '#ff00ff'
-    })).setOrigin(0.5));
+    bg.strokeRoundedRect(-bw / 2, -bh / 2, bw, bh, 16);
+    toast.add([bg, label]);
     toast.alpha = 0;
     this.tweens.add({ targets: toast, alpha: 1, duration: 200 });
     this.time.delayedCall(1500, () => {
@@ -205,29 +213,37 @@ export class DevMenuScene extends Phaser.Scene {
   }
 
   confirmReset() {
+    const w = 720;
+    // Measured first so the card can be sized to fit them.
+    const title = this.add.text(0, 0, 'Wipe ALL progress?', style('display', {
+      fontSize: '52px',
+      fill: '#ffffff'
+    })).setOrigin(0.5, 0);
+    const body = this.add.text(0, 0, 'Stars, worlds, pet, ship, cosmetics. All gone.', style('body', {
+      fill: '#cfcfe0',
+      align: 'center',
+      wordWrap: { width: w - 100, useAdvancedWrap: true }
+    })).setOrigin(0.5, 0);
+    const btnH = 88;
+    const h = 44 + title.height + 20 + body.height + 40 + btnH + 44;
     const { card, close } = createModal(this, {
-      width: 720, height: 420,
+      width: w, height: h,
       accentColor: 0xc44b5e,
       showCloseHint: false
     });
-    card.add(this.add.text(0, -130, 'Wipe ALL progress?', style('display', {
-      fontSize: '40px',
-      fill: '#ffffff'
-    })).setOrigin(0.5));
-    card.add(this.add.text(0, -60, 'Stars, worlds, pet, ship, cosmetics. All gone.', style('caption', {
-      fontSize: '22px',
-      fill: '#cfcfe0',
-      align: 'center'
-    })).setOrigin(0.5));
+    title.y = -h / 2 + 44;
+    body.y = title.y + title.height + 20;
+    card.add([title, body]);
+    const btnY = h / 2 - 44 - btnH / 2;
     card.add(createButton(this, {
-      x: -120, y: 100, label: 'Cancel',
-      width: 200, height: 84,
+      x: -140, y: btnY, label: 'Cancel',
+      width: 240, height: btnH,
       color: 0x4a4a6a,
       onClick: close
     }));
     card.add(createButton(this, {
-      x: 120, y: 100, label: 'WIPE',
-      width: 200, height: 84,
+      x: 140, y: btnY, label: 'WIPE',
+      width: 240, height: btnH,
       color: 0xc44b5e,
       onClick: () => {
         progress.resetAll();

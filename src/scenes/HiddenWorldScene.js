@@ -5,7 +5,7 @@ import { progress, findWorld } from '../GameData.js';
 import { audio } from '../AudioManager.js';
 import { music } from '../MusicManager.js';
 import { TransitionManager } from '../TransitionManager.js';
-import { style } from '../textStyles.js';
+import { style, TYPE } from '../textStyles.js';
 import { createButton } from '../buttonHelper.js';
 import { createModal } from '../modalHelper.js';
 import { companion, drawCompanion } from '../CompanionManager.js';
@@ -38,14 +38,59 @@ function fitTextToBox(textObj, message, maxH, sizes) {
   }
 }
 
-// Object labels in every secret room share one style. 32px keeps them near
-// 11pt on a 393pt-wide iPhone; the old 20px read at about 7pt. Each room keeps
-// its own ink colors.
-const ROOM_LABEL_STYLE = { fontSize: '32px', fontStyle: '800', strokeThickness: 5 };
+// Object labels in every secret room share one style, at the label size on the
+// type scale (13pt on a 393pt-wide iPhone; the old 20px read at about 7pt).
+// Each room keeps its own ink colors.
+const ROOM_LABEL_STYLE = { fontSize: `${TYPE.label}px`, fontStyle: '800', strokeThickness: 5 };
 
 function addRoomLabel(scene, x, y, text, fill, stroke) {
   return scene.add.text(x, y, text, style('caption', { ...ROOM_LABEL_STYLE, fill, stroke }))
     .setOrigin(0.5).setDepth(8);
+}
+
+// Every secret room leaves by the same top-right button. Dark ink on the gray
+// face: the old white lettering on this gray read at about 2.8:1.
+function addLeaveButton(scene, onClick) {
+  return createButton(scene, {
+    x: W - 130, y: 100, label: 'Leave',
+    width: 200, height: 80,
+    color: 0x9a9aae,
+    textOverrides: { fill: '#0a0a1a', fontStyle: '800' },
+    onClick
+  }).setDepth(15);
+}
+
+// The "NEW +10 ✨" sticker a note board wears on its first read of the day.
+// Sized from its text at the label size, so it never clips it. Stacked on two
+// lines by default; `row: true` lays the same words out on one line, for the
+// notes boards, where only a short strip under the lettering is free. The
+// returned container carries its size as badgeW / badgeH for placement.
+function makeNewNoteBadge(scene, { row = false } = {}) {
+  const badge = scene.add.container(0, 0);
+  const ink = { fill: '#2a1f12' };
+  const top = scene.add.text(0, 0, 'NEW', style('caption', { ...ink, fontStyle: '900' })).setOrigin(0.5);
+  const bottom = scene.add.text(0, 0, '+10 ✨', style('caption', { ...ink, fontStyle: '800' })).setOrigin(0.5);
+  const padX = 18, padY = 8, tuck = 8; // the two line boxes carry air, so tuck them together
+  let w, h;
+  if (row) {
+    const gap = 14;
+    w = Math.ceil(top.width + gap + bottom.width) + padX * 2;
+    h = Math.ceil(Math.max(top.height, bottom.height)) + padY * 2;
+    top.x = -w / 2 + padX + top.width / 2;
+    bottom.x = w / 2 - padX - bottom.width / 2;
+  } else {
+    w = Math.ceil(Math.max(top.width, bottom.width)) + padX * 2;
+    h = Math.ceil(top.height + bottom.height) - tuck + padY * 2;
+    top.y = -h / 2 + padY + top.height / 2;
+    bottom.y = h / 2 - padY - bottom.height / 2;
+  }
+  const bg = scene.add.graphics();
+  bg.fillStyle(0xffd86b, 1); bg.fillRoundedRect(-w / 2, -h / 2, w, h, 12);
+  bg.lineStyle(3, 0x2a1f12, 1); bg.strokeRoundedRect(-w / 2, -h / 2, w, h, 12);
+  badge.add([bg, top, bottom]);
+  badge.badgeW = w;
+  badge.badgeH = h;
+  return badge;
 }
 
 // The message box sizes itself to its text. Rooms dock it in the top strip
@@ -58,6 +103,12 @@ const BUBBLE_MAX_W = 960;
 const BUBBLE_MAX_H = 170;
 const BUBBLE_PAD_X = 48;
 const BUBBLE_PAD_Y = 24;
+
+// Dad's notes board (playground + hot pot), in the board's own coordinates:
+// the ground line is y 124. Wide and tall enough for "DAD'S NOTES" at the
+// label size and "Tap to read" at the body size. drawDadNotesBoard draws to
+// these numbers.
+const NOTES_BOARD = { halfW: 152, top: -108, bottom: 62, headerY: -66, dividerY: -38, hintY: 4 };
 
 export class HiddenWorldScene extends Phaser.Scene {
   constructor() {
@@ -117,10 +168,12 @@ export class HiddenWorldScene extends Phaser.Scene {
 
     // Bubble text lives in src/content/dadGarage.js.
     const bubbleFor = id => (GARAGE_ITEMS.find(i => i.id === id)?.bubble) || '';
+    // labelDx: at the label size, "Pantry rack" and "Storage bins" meet in the
+    // gap between the two, so each label leans out toward its own side.
     const items = [
       { id: 'freezer',  x: 175,    y: 580,  hitW: 240, hitH: 200, draw: drawChestFreezer, label: 'Chest freezer' },
-      { id: 'rack',     x: 470,    y: 580,  hitW: 240, hitH: 320, draw: drawStorageRack,  label: 'Pantry rack' },
-      { id: 'bins',     x: 690,    y: 600,  hitW: 200, hitH: 200, draw: drawStorageBins,  label: 'Storage bins' },
+      { id: 'rack',     x: 470,    y: 580,  hitW: 240, hitH: 320, draw: drawStorageRack,  label: 'Pantry rack', labelDx: -16 },
+      { id: 'bins',     x: 690,    y: 600,  hitW: 200, hitH: 200, draw: drawStorageBins,  label: 'Storage bins', labelDx: 12 },
       { id: 'squat',    x: 940,    y: 600,  hitW: 220, hitH: 280, draw: drawSquatRack,    label: 'Squat rack' },
       { id: 'laptop',   x: 215,    y: 950,  hitW: 240, hitH: 200, draw: drawMacBook,      label: 'Laptop' },
       { id: 'printer',  x: 470,    y: 950,  hitW: 200, hitH: 200, draw: drawBambuA1,      label: '3D printer' },
@@ -155,7 +208,7 @@ export class HiddenWorldScene extends Phaser.Scene {
       // the 3D printer printing, the laptop glowing, …). No-op for the rest.
       this.animateGarageItem(item.id, node);
 
-      addRoomLabel(this, item.x, item.y + item.hitH / 2 + 16, item.label, '#ffd86b', '#0a0a1a');
+      addRoomLabel(this, item.x + (item.labelDx || 0), item.y + item.hitH / 2 + 16, item.label, '#ffd86b', '#0a0a1a');
 
       const hit = this.add.rectangle(item.x, item.y, item.hitW, item.hitH, 0, 0)
         .setInteractive({ useHandCursor: true }).setDepth(9);
@@ -175,21 +228,14 @@ export class HiddenWorldScene extends Phaser.Scene {
     // After the objects: the pet's routines use the node table above.
     this.createGaragePet();
 
-    const leaveBtn = createButton(this, {
-      x: W - 130, y: 100, label: 'Leave',
-      width: 200, height: 80,
-      color: 0x9a9aae,
-      textOverrides: { fontSize: '24px', fill: '#ffffff' },
-      onClick: () => {
-        // Crossfade back to the host chapter's ambient (the map re-confirms it).
-        const homeKey = this.world?.chapter === 2
-          ? music.resolveTrack(this, 'innerSpaceHome', 'homeTheme')
-          : 'homeTheme';
-        music.fadeToTrack(this, homeKey);
-        this.scene.start('WorldMapScene');
-      }
+    addLeaveButton(this, () => {
+      // Crossfade back to the host chapter's ambient (the map re-confirms it).
+      const homeKey = this.world?.chapter === 2
+        ? music.resolveTrack(this, 'innerSpaceHome', 'homeTheme')
+        : 'homeTheme';
+      music.fadeToTrack(this, homeKey);
+      this.scene.start('WorldMapScene');
     });
-    leaveBtn.setDepth(15);
   }
 
   drawGarageBackdrop() {
@@ -292,7 +338,7 @@ export class HiddenWorldScene extends Phaser.Scene {
       align: 'center',
       wordWrap: { width: BUBBLE_MAX_W - BUBBLE_PAD_X * 2 }
     })).setOrigin(0.5);
-    fitTextToBox(t, text, BUBBLE_MAX_H - BUBBLE_PAD_Y * 2, [42, 38, 34, 30]);
+    fitTextToBox(t, text, BUBBLE_MAX_H - BUBBLE_PAD_Y * 2, [TYPE.body, TYPE.label]);
     const bw = Math.min(BUBBLE_MAX_W, t.width + BUBBLE_PAD_X * 2);
     const bh = t.height + BUBBLE_PAD_Y * 2;
     const bg = this.add.graphics();
@@ -333,46 +379,65 @@ export class HiddenWorldScene extends Phaser.Scene {
 
     // However the card is dismissed (Sweet, or a tap anywhere on the dim), the
     // pet puts on the freshly-equipped glasses and goes to dig through the bins
-    // where they were found.
-    const { card, close } = createModal(this, {
-      width: 880, height: 660,
-      accentColor: 0xffd86b,
-      showCloseHint: false,
+    // where they were found. The button just dismisses the card: the kid stays
+    // in the garage and leaves on their own via the Leave button.
+    return this.showFoundItCard({
+      accent: 0xffd86b,
+      ink: '#0a0a1a',
+      subtitle: 'Tucked away in the storage bins.',
+      unlocked: "Unlocked: Dad's Glasses",
+      buttonLabel: 'Sweet',
       onClose: () => {
         this.refreshGaragePet();
         this.garagePetInteract('bins');
       }
     });
-    card.add(this.add.text(0, -220, 'YOU FOUND IT!', style('display', {
+  }
+
+  // The found-it card every secret room shows the first time its secret is
+  // found, built once so the three rooms stay in step. It shows the pet
+  // wearing the reward it just equipped. `onButton` runs from the button only,
+  // just before the card closes; `onClose` runs however the card is dismissed.
+  // `ink` is the dark tone for the title outline and the button lettering.
+  showFoundItCard({ accent, ink, subtitle, unlocked, buttonLabel, onButton = null, onClose = null }) {
+    const accentHex = '#' + accent.toString(16).padStart(6, '0');
+    const { card, close } = createModal(this, {
+      width: 880, height: 740,
+      accentColor: accent,
+      showCloseHint: false,
+      onClose
+    });
+    card.add(this.add.text(0, -270, 'YOU FOUND IT!', style('display', {
       fontSize: '60px',
-      fill: '#ffd86b',
-      stroke: '#0a0a1a',
+      fill: accentHex,
+      stroke: ink,
       strokeThickness: 5
     })).setOrigin(0.5));
-    card.add(this.add.text(0, -130, 'Tucked away in the storage bins.', style('caption', {
-      fontSize: '24px',
-      fill: '#cfcfe0',
-      align: 'center'
+    card.add(this.add.text(0, -186, subtitle, style('body', {
+      fill: '#e0e0ef',
+      align: 'center',
+      wordWrap: { width: 800 }
     })).setOrigin(0.5));
 
-    // Show the pet wearing the freshly-equipped glasses.
-    const previewPet = drawCompanion(this, 0, 20, { scale: 1.4 });
-    card.add(previewPet);
+    card.add(drawCompanion(this, 0, -20, { scale: 1.4 }));
 
-    card.add(this.add.text(0, 150, "Unlocked: Dad's Glasses", style('subhead', {
-      fontSize: '32px',
-      fill: '#ffd86b',
-      align: 'center'
+    // The reward's name, at the heading size: it names what was just found.
+    card.add(this.add.text(0, 130, unlocked, style('headline', {
+      fontSize: `${TYPE.heading}px`,
+      fill: accentHex,
+      align: 'center',
+      wordWrap: { width: 800 }
     })).setOrigin(0.5));
 
     card.add(createButton(this, {
-      x: 0, y: 240, width: 320, height: 92,
-      label: 'Sweet',
-      color: 0xffd86b,
-      textOverrides: { fontSize: '28px', fill: '#0a0a1a', fontStyle: '900' },
-      // Stay in the garage after finding the glasses — just dismiss the card.
-      // The kid keeps exploring and leaves on their own via the Leave button.
-      onClick: () => close()
+      x: 0, y: 250, width: 320, height: 92,
+      label: buttonLabel,
+      color: accent,
+      textOverrides: { fill: ink, fontStyle: '900' },
+      onClick: () => {
+        onButton?.();
+        close();
+      }
     }));
     return card;
   }
@@ -390,56 +455,49 @@ export class HiddenWorldScene extends Phaser.Scene {
       stardustAwarded = true;
     }
 
-    // Whiteboard frame, mounted on the wall above the pegboard.
-    const wb = this.add.container(W / 2, 268).setDepth(3);
+    // Whiteboard frame, mounted on the wall between the room title and the
+    // pegboard. Sized for three lines of the note at the label size; the heat
+    // lamp hangs just left of it and the Leave button sits above-right.
+    const bw = 560, bh = 166, by = 288;
+    const wb = this.add.container(W / 2, by).setDepth(3);
     const frame = this.add.graphics();
     // Outer frame
     frame.fillStyle(0x2a2620, 1);
-    frame.fillRoundedRect(-220, -60, 440, 120, 6);
+    frame.fillRoundedRect(-bw / 2, -bh / 2, bw, bh, 6);
     // White marker board
     frame.fillStyle(0xfafaf0, 1);
-    frame.fillRoundedRect(-212, -52, 424, 104, 4);
+    frame.fillRoundedRect(-bw / 2 + 8, -bh / 2 + 8, bw - 16, bh - 16, 4);
     // Marker tray
     frame.fillStyle(0x4a3f30, 1);
-    frame.fillRoundedRect(-220, 56, 440, 8, 2);
+    frame.fillRoundedRect(-bw / 2, bh / 2 - 4, bw, 8, 2);
     frame.fillStyle(0xff5b6e, 1);
-    frame.fillCircle(-160, 60, 5);
+    frame.fillCircle(-bw / 2 + 60, bh / 2, 5);
     frame.fillStyle(0x39ff14, 1);
-    frame.fillCircle(-130, 60, 5);
+    frame.fillCircle(-bw / 2 + 90, bh / 2, 5);
     wb.add(frame);
 
     // The day's message, hand-lettered feel. This board shows the note INLINE on
-    // a fixed 424x104 panel, and the shared pool holds some long notes, so shrink
-    // to fit and fall back to a trimmed teaser — tapping opens the full text.
+    // a fixed panel: a short note reads at the body size, a longer one steps
+    // down to the label size, and a long one becomes a trimmed teaser at the
+    // label size. Tapping opens the full text.
     const noteText = this.add.text(0, 0, message, style('body', {
-      fontSize: '20px',
       fill: '#2a1f12',
       align: 'center',
-      wordWrap: { width: 400 },
+      wordWrap: { width: bw - 60 },
       fontStyle: 'italic'
     })).setOrigin(0.5);
-    fitTextToBox(noteText, message, 96, [20, 18, 16, 14, 13]);
+    fitTextToBox(noteText, message, bh - 28, [TYPE.body, TYPE.label]);
     wb.add(noteText);
 
-    // "NEW +10 ✨" badge if this is a fresh claim — fades on tap.
+    // "NEW +10 ✨" badge if this is a fresh claim, fades on tap. It hangs off
+    // the board's top-right corner onto the bare wall, clear of the note, the
+    // title and the Leave button, and is tappable like the board. Only its
+    // edge laps the frame: the note's lines run right up to the white panel's
+    // edge, and a badge lapped onto the panel crowded them.
     let badge = null;
     if (stardustAwarded) {
-      badge = this.add.container(208, -52);
-      const badgeBg = this.add.graphics();
-      badgeBg.fillStyle(0xffd86b, 1);
-      badgeBg.fillRoundedRect(-44, -22, 88, 44, 8);
-      badgeBg.lineStyle(2, 0x2a1f12, 1);
-      badgeBg.strokeRoundedRect(-44, -22, 88, 44, 8);
-      badge.add(badgeBg);
-      badge.add(this.add.text(0, -4, 'NEW', style('caption', {
-        fontSize: '14px',
-        fill: '#2a1f12',
-        fontStyle: '900'
-      })).setOrigin(0.5));
-      badge.add(this.add.text(0, 10, '+10 ✨', style('caption', {
-        fontSize: '12px',
-        fill: '#2a1f12'
-      })).setOrigin(0.5));
+      badge = makeNewNoteBadge(this);
+      badge.setPosition(bw / 2 + badge.badgeW / 2 - 8, -bh / 2 + badge.badgeH / 2);
       wb.add(badge);
       this.tweens.add({
         targets: badge,
@@ -451,9 +509,7 @@ export class HiddenWorldScene extends Phaser.Scene {
       });
     }
 
-    const hit = this.add.rectangle(W / 2, 268, 460, 130, 0, 0)
-      .setInteractive({ useHandCursor: true }).setDepth(4);
-    hit.on('pointerdown', () => {
+    const openNote = () => {
       audio.playClick?.();
       if (badge) {
         const fading = badge;
@@ -465,7 +521,16 @@ export class HiddenWorldScene extends Phaser.Scene {
         });
       }
       this.showDailyNotePopup(message);
-    });
+    };
+    const hit = this.add.rectangle(W / 2, by, bw + 20, bh + 24, 0, 0)
+      .setInteractive({ useHandCursor: true }).setDepth(4);
+    hit.on('pointerdown', openNote);
+    if (badge) {
+      const badgeHit = this.add.rectangle(0, 0, badge.badgeW, badge.badgeH, 0, 0)
+        .setInteractive({ useHandCursor: true });
+      badge.add(badgeHit);
+      badgeHit.on('pointerdown', openNote);
+    }
   }
 
   // `onClose` runs when the popup is dismissed (the hot pot board uses it to
@@ -487,25 +552,31 @@ export class HiddenWorldScene extends Phaser.Scene {
       strokeThickness: 5
     })).setOrigin(0.5));
 
+    // The board fills the card below the title; its inner panel is 736x616.
     const board = this.add.graphics();
     board.fillStyle(0x2a2620, 1);
-    board.fillRoundedRect(-380, -280, 760, 560, 10);
+    board.fillRoundedRect(-380, -300, 760, 640, 10);
     board.fillStyle(0xfafaf0, 1);
-    board.fillRoundedRect(-368, -268, 736, 536, 6);
+    board.fillRoundedRect(-368, -288, 736, 616, 6);
     card.add(board);
 
-    // Scale the type to the note length so long recess notes still fit the board
-    // while short garage notes stay big and bold.
-    const len = message ? message.length : 0;
-    const fontSize = len > 190 ? 34 : len > 150 ? 38 : len > 110 ? 42 : len > 70 ? 48 : 52;
-    card.add(this.add.text(0, 0, message, style('body', {
-      fontSize: fontSize + 'px',
+    // The note at the biggest size on the scale that fits the board:
+    // heading size for every note in the current deck (153 characters at most),
+    // stepping down to body, then the label size, only if a longer one arrives.
+    const sizes = [TYPE.heading, TYPE.body, TYPE.label];
+    const noteText = this.add.text(0, 20, message, style('body', {
+      fontSize: sizes[0] + 'px',
       fill: '#2a1f12',
       align: 'center',
       wordWrap: { width: 680 },
-      fontStyle: 'italic',
-      lineSpacing: Math.round(fontSize * 0.26)
-    })).setOrigin(0.5));
+      fontStyle: 'italic'
+    })).setOrigin(0.5);
+    for (const size of sizes) {
+      noteText.setFontSize(size);
+      noteText.setLineSpacing(Math.round(size * 0.26));
+      if (noteText.height <= 560) break;
+    }
+    card.add(noteText);
   }
 
   // ----------------------------------------------------------
@@ -700,11 +771,12 @@ export class HiddenWorldScene extends Phaser.Scene {
     return this._gpHost ? this._gpAt(this._gpHost, pet.x, pet.y) : { x: pet.x, y: pet.y };
   }
 
-  // A little heart / letter floating up off the pet's head.
+  // A little heart / letter floating up off the pet's head. Decorative glyphs,
+  // so they keep their own sizes (the napping z's grow 28, 34, 40).
   _gpEmote(text, color = '#ff9ec7', size = 36) {
     const at = this._gpWorld();
     const t = this.add.text(at.x + 30, at.y - this._gpFoot() - 6, text, style('display', {
-      fontSize: size + 'px', fill: color
+      fontSize: size + 'px', fill: color, art: true
     })).setOrigin(0.5).setDepth(20);
     this.tweens.add({
       targets: t, y: t.y - 50, alpha: 0, duration: 800,
@@ -1955,10 +2027,10 @@ export class HiddenWorldScene extends Phaser.Scene {
       });
     }
 
-    // Dad's notes board on the woodchips — same daily mechanic as the garage
+    // Dad's notes board on the woodchips, same daily mechanic as the garage
     // whiteboard (its own list + its own once-per-day stardust). Sits low enough
     // that it never overlaps the "Zip line" label in the row above.
-    this.createNotesBoard(560, 1592, { boardKey: 'playground' });
+    this.createNotesBoard(560, 1600, { boardKey: 'playground' });
 
     // The running track spans the entire bottom of the screen (drawn in the
     // backdrop). One full-width hit zone lets the pet dash a lap.
@@ -1974,20 +2046,13 @@ export class HiddenWorldScene extends Phaser.Scene {
       this.petRunTrack();
     });
 
-    const leaveBtn = createButton(this, {
-      x: W - 130, y: 100, label: 'Leave',
-      width: 200, height: 80,
-      color: 0x9a9aae,
-      textOverrides: { fontSize: '24px', fill: '#ffffff' },
-      onClick: () => {
-        const homeKey = this.world?.chapter === 2
-          ? music.resolveTrack(this, 'innerSpaceHome', 'homeTheme')
-          : 'homeTheme';
-        music.fadeToTrack(this, homeKey);
-        this.scene.start('WorldMapScene');
-      }
+    addLeaveButton(this, () => {
+      const homeKey = this.world?.chapter === 2
+        ? music.resolveTrack(this, 'innerSpaceHome', 'homeTheme')
+        : 'homeTheme';
+      music.fadeToTrack(this, homeKey);
+      this.scene.start('WorldMapScene');
     });
-    leaveBtn.setDepth(15);
   }
 
   drawPlaygroundBackdrop() {
@@ -2134,28 +2199,33 @@ export class HiddenWorldScene extends Phaser.Scene {
       duration: 1700, yoyo: true, repeat: -1, ease: 'Sine.easeInOut'
     });
 
-    // Header + affordance lettered onto the parchment.
-    node.add(this.add.text(0, -46, "DAD'S NOTES", style('caption', {
-      fontSize: '22px', fill: '#2a1f12', fontStyle: '900'
+    // Header lettered onto the parchment at the label size; the "Tap to read"
+    // instruction under it at the body size, like every other hint (the
+    // parchment in drawDadNotesBoard is sized to hold them).
+    node.add(this.add.text(0, NOTES_BOARD.headerY, "DAD'S NOTES", style('caption', {
+      fill: '#2a1f12', fontStyle: '900'
     })).setOrigin(0.5));
-    node.add(this.add.text(0, 8, 'Tap to read', style('caption', {
-      fontSize: '18px', fill: '#6a5a44', fontStyle: 'italic'
-    })).setOrigin(0.5));
+    const hint = this.add.text(0, NOTES_BOARD.hintY, 'Tap to read', style('body', {
+      fill: '#5a4a36', fontStyle: 'italic'
+    })).setOrigin(0.5);
+    node.add(hint);
 
     // Ground label, matching the other equipment.
-    addRoomLabel(this, x, y + 132, "Dad's notes", '#ffffff', labelStroke);
+    const labelDy = 132;
+    const label = addRoomLabel(this, x, y + labelDy, "Dad's notes", '#ffffff', labelStroke);
 
-    // NEW +10 ✨ badge on a fresh day; fades + stops bobbing on tap.
+    // NEW +10 ✨ badge on a fresh day; fades + stops bobbing on tap. One row,
+    // stuck across the foot of the board in the strip between "Tap to read"
+    // and the ground label: both rooms pack their neighbors (the spinner, the
+    // sauce bar, the cone machine) right up to the board, and a sticker hung
+    // off its side covered them and their tap zones.
     let badge = null;
     let badgeTween = null;
     if (awarded) {
-      badge = this.add.container(120, -72);
-      const bg = this.add.graphics();
-      bg.fillStyle(0xffd86b, 1); bg.fillRoundedRect(-50, -24, 100, 48, 9);
-      bg.lineStyle(2, 0x2a1f12, 1); bg.strokeRoundedRect(-50, -24, 100, 48, 9);
-      badge.add(bg);
-      badge.add(this.add.text(0, -6, 'NEW', style('caption', { fontSize: '15px', fill: '#2a1f12', fontStyle: '900' })).setOrigin(0.5));
-      badge.add(this.add.text(0, 11, '+10 ✨', style('caption', { fontSize: '13px', fill: '#2a1f12' })).setOrigin(0.5));
+      badge = makeNewNoteBadge(this, { row: true });
+      const hintBottom = NOTES_BOARD.hintY + hint.height / 2;
+      const labelTop = labelDy - label.height / 2;
+      badge.setPosition(0, Math.round((hintBottom + labelTop) / 2));
       node.add(badge);
       badgeTween = this.tweens.add({
         targets: badge, scale: { from: 1, to: 1.1 },
@@ -2163,9 +2233,7 @@ export class HiddenWorldScene extends Phaser.Scene {
       });
     }
 
-    const hit = this.add.rectangle(x, y, 244, 230, 0, 0)
-      .setInteractive({ useHandCursor: true }).setDepth(9);
-    hit.on('pointerdown', () => {
+    const openNote = () => {
       audio.playClick?.();
       if (badge) {
         const fading = badge; badge = null;
@@ -2175,7 +2243,18 @@ export class HiddenWorldScene extends Phaser.Scene {
       // The reaction waits for the popup to close, so it plays in the open
       // room rather than hidden behind the modal dim.
       this.showDailyNotePopup(message, onTap);
-    });
+    };
+    // Board plus posts, from the frame top down to the ground line.
+    const hitTop = NOTES_BOARD.top - 6, hitBottom = 128;
+    const hit = this.add.rectangle(x, y + (hitTop + hitBottom) / 2, NOTES_BOARD.halfW * 2 + 16, hitBottom - hitTop, 0, 0)
+      .setInteractive({ useHandCursor: true }).setDepth(9);
+    hit.on('pointerdown', openNote);
+    if (badge) {
+      const badgeHit = this.add.rectangle(0, 0, badge.badgeW, badge.badgeH, 0, 0)
+        .setInteractive({ useHandCursor: true });
+      badge.add(badgeHit);
+      badgeHit.on('pointerdown', openNote);
+    }
   }
 
   // ----- Pet interactions: the companion actually plays on each piece -----
@@ -2349,44 +2428,15 @@ export class HiddenWorldScene extends Phaser.Scene {
     cosmetics.addAndEquip('acc_dried_mango');
     audio.playMatch?.();
 
-    const { card, close } = createModal(this, {
-      width: 880, height: 660,
-      accentColor: 0x7ed957,
-      showCloseHint: false
-    });
-    card.add(this.add.text(0, -220, 'YOU FOUND IT!', style('display', {
-      fontSize: '60px',
-      fill: '#7ed957',
-      stroke: '#0a2a12',
-      strokeThickness: 5
-    })).setOrigin(0.5));
-    card.add(this.add.text(0, -130, 'You crossed the monkey bars!', style('caption', {
-      fontSize: '24px',
-      fill: '#cfcfe0',
-      align: 'center'
-    })).setOrigin(0.5));
-
     // Pet preview holding the freshly-equipped dried mango.
-    const previewPet = drawCompanion(this, 0, 20, { scale: 1.4 });
-    card.add(previewPet);
-
-    card.add(this.add.text(0, 150, 'Unlocked: Dried Mango', style('subhead', {
-      fontSize: '32px',
-      fill: '#7ed957',
-      align: 'center'
-    })).setOrigin(0.5));
-
-    card.add(createButton(this, {
-      x: 0, y: 240, width: 320, height: 92,
-      label: 'Awesome',
-      color: 0x7ed957,
-      textOverrides: { fontSize: '28px', fill: '#0a2a12', fontStyle: '900' },
-      onClick: () => {
-        this.refreshRecessPet();
-        close();
-      }
-    }));
-    return card;
+    return this.showFoundItCard({
+      accent: 0x7ed957,
+      ink: '#0a2a12',
+      subtitle: 'You crossed the monkey bars!',
+      unlocked: 'Unlocked: Dried Mango',
+      buttonLabel: 'Awesome',
+      onButton: () => this.refreshRecessPet()
+    });
   }
 
   // Redraw the in-scene pet so the just-equipped medal shows up immediately.
@@ -2522,17 +2572,10 @@ export class HiddenWorldScene extends Phaser.Scene {
 
     this.createHotPotPet();
 
-    const leaveBtn = createButton(this, {
-      x: W - 130, y: 100, label: 'Leave',
-      width: 200, height: 80,
-      color: 0x9a9aae,
-      textOverrides: { fontSize: '24px', fill: '#ffffff' },
-      onClick: () => {
-        music.fadeToTrack(this, music.resolveTrack(this, 'homeGroundHome', 'homeTheme'));
-        this.scene.start('WorldMapScene');
-      }
+    addLeaveButton(this, () => {
+      music.fadeToTrack(this, music.resolveTrack(this, 'homeGroundHome', 'homeTheme'));
+      this.scene.start('WorldMapScene');
     });
-    leaveBtn.setDepth(15);
   }
 
   drawHotPotBackdrop() {
@@ -2863,12 +2906,14 @@ export class HiddenWorldScene extends Phaser.Scene {
       tg.fillStyle(0xd9a05b, 1); tg.fillRoundedRect(-32, -25, 64, 50, 6);
       tg.fillStyle(0xf5e2b8, 1); tg.fillRoundedRect(-27, -20, 54, 40, 4);
       tag.add(tg);
+      // Lettering on the tag, so it scales with it: held up at 1.3x, the 28px
+      // number reads at the label size.
       tag.add(this.add.text(0, 0, '83', style('caption', {
-        fontSize: '28px', fill: '#8a3a1e', fontStyle: '900'
+        fontSize: '28px', fill: '#8a3a1e', fontStyle: '900', art: true
       })).setOrigin(0.5));
-      tag.setScale(0.4).setAlpha(0);
+      tag.setScale(0.52).setAlpha(0);
       this.tweens.add({
-        targets: tag, y: pet.y - 76, scale: 1, alpha: 1, duration: 320, ease: 'Back.easeOut',
+        targets: tag, y: pet.y - 84, scale: 1.3, alpha: 1, duration: 320, ease: 'Back.easeOut',
         onComplete: () => {
           this.tweens.add({
             targets: tag, angle: { from: -9, to: 9 }, duration: 220, yoyo: true, repeat: 2, ease: 'Sine.easeInOut'
@@ -2971,8 +3016,9 @@ export class HiddenWorldScene extends Phaser.Scene {
       this.tweens.add({
         targets: pet, y: bowlY + 22, duration: 200, yoyo: true, ease: 'Sine.easeInOut',
         onComplete: () => {
+          // A prop, not reading text: it keeps its own size.
           const loot = this.add.text(pet.x + 26, pet.y - 34, '🍜', style('display', {
-            fontSize: '30px'
+            fontSize: '30px', art: true
           })).setOrigin(0.5).setDepth(20);
           this.tweens.add({
             targets: loot, y: loot.y - 26, alpha: 0, duration: 900,
@@ -3234,45 +3280,16 @@ export class HiddenWorldScene extends Phaser.Scene {
     cosmetics.addAndEquip('acc_free_cone');
     audio.playMatch?.();
 
-    const { card, close } = createModal(this, {
-      width: 880, height: 660,
-      accentColor: 0xffb85c,
-      showCloseHint: false
+    // Stay in the room after the cone: the kid keeps exploring and leaves on
+    // their own, same as the garage.
+    return this.showFoundItCard({
+      accent: 0xffb85c,
+      ink: '#2a1008',
+      subtitle: 'The one at the end. On the house.',
+      unlocked: 'Unlocked: Free Cone',
+      buttonLabel: 'Yes!',
+      onButton: () => this.refreshHotPotPet()
     });
-    card.add(this.add.text(0, -220, 'YOU FOUND IT!', style('display', {
-      fontSize: '60px',
-      fill: '#ffb85c',
-      stroke: '#2a1008',
-      strokeThickness: 5
-    })).setOrigin(0.5));
-    card.add(this.add.text(0, -130, 'The one at the end. On the house.', style('caption', {
-      fontSize: '24px',
-      fill: '#cfcfe0',
-      align: 'center'
-    })).setOrigin(0.5));
-
-    const previewPet = drawCompanion(this, 0, 20, { scale: 1.4 });
-    card.add(previewPet);
-
-    card.add(this.add.text(0, 150, 'Unlocked: Free Cone', style('subhead', {
-      fontSize: '32px',
-      fill: '#ffb85c',
-      align: 'center'
-    })).setOrigin(0.5));
-
-    card.add(createButton(this, {
-      x: 0, y: 240, width: 320, height: 92,
-      label: 'Yes!',
-      color: 0xffb85c,
-      textOverrides: { fontSize: '28px', fill: '#2a1008', fontStyle: '900' },
-      // Stay in the room after the cone — the kid keeps exploring and leaves on
-      // their own, same as the garage.
-      onClick: () => {
-        this.refreshHotPotPet();
-        close();
-      }
-    }));
-    return card;
   }
 }
 
@@ -3754,26 +3771,32 @@ function drawSpinnerSeat(g) {
   g.fillStyle(0xffffff, 0.4); g.fillEllipse(-24, -32, 40, 12);
 }
 
-// Dad's notes board — a parchment notice board on two wooden posts. Headers and
-// the "Tap to read" affordance are added as text by createRecessNoteBoard.
+// Dad's notes board: a parchment notice board on two wooden posts. Headers and
+// the "Tap to read" affordance are added as text by createNotesBoard, at the
+// NOTES_BOARD positions.
 function drawDadNotesBoard(g) {
+  const { halfW, top, bottom, dividerY } = NOTES_BOARD;
+  const inset = 14;
+  const px = -halfW + inset, pw = (halfW - inset) * 2;
+  const pTop = top + inset, pBottom = bottom - inset;
   // ground shadow
-  g.fillStyle(0x000000, 0.16); g.fillEllipse(0, 124, 150, 22);
+  g.fillStyle(0x000000, 0.16); g.fillEllipse(0, 124, 190, 24);
   // posts
-  g.fillStyle(0x6e4a28, 1); g.fillRect(-70, 38, 15, 86); g.fillRect(55, 38, 15, 86);
-  g.fillStyle(0x855c34, 1); g.fillRect(-70, 38, 5, 86); g.fillRect(55, 38, 5, 86);
+  const postH = 124 - bottom + 4;
+  g.fillStyle(0x6e4a28, 1); g.fillRect(-90, bottom - 4, 16, postH); g.fillRect(74, bottom - 4, 16, postH);
+  g.fillStyle(0x855c34, 1); g.fillRect(-90, bottom - 4, 5, postH); g.fillRect(74, bottom - 4, 5, postH);
   // dark wood frame
-  g.fillStyle(0x5e3d22, 1); g.fillRoundedRect(-118, -96, 236, 146, 12);
-  g.fillStyle(0x7a5230, 1); g.fillRoundedRect(-118, -96, 236, 9, 6);
+  g.fillStyle(0x5e3d22, 1); g.fillRoundedRect(-halfW, top, halfW * 2, bottom - top, 12);
+  g.fillStyle(0x7a5230, 1); g.fillRoundedRect(-halfW, top, halfW * 2, 9, 6);
   // parchment surface
-  g.fillStyle(0xf5ecd6, 1); g.fillRoundedRect(-104, -82, 208, 118, 6);
-  g.fillStyle(0xe9dcbd, 1); g.fillRect(-104, 22, 208, 14);
+  g.fillStyle(0xf5ecd6, 1); g.fillRoundedRect(px, pTop, pw, pBottom - pTop, 6);
+  g.fillStyle(0xe9dcbd, 1); g.fillRect(px, pBottom - 14, pw, 14);
   // divider under the header
-  g.fillStyle(0xcdbf9a, 1); g.fillRect(-84, -26, 168, 3);
-  // two red thumbtacks
-  for (const tx of [-84, 84]) {
-    g.fillStyle(0xc23a3a, 1); g.fillCircle(tx, -68, 6);
-    g.fillStyle(0xff9a9a, 0.85); g.fillCircle(tx - 2, -70, 2.2);
+  g.fillStyle(0xcdbf9a, 1); g.fillRect(-118, dividerY, 236, 3);
+  // two red thumbtacks, pinning the lower corners (the header spans the top)
+  for (const tx of [-halfW + 34, halfW - 34]) {
+    g.fillStyle(0xc23a3a, 1); g.fillCircle(tx, pBottom - 24, 6);
+    g.fillStyle(0xff9a9a, 0.85); g.fillCircle(tx - 2, pBottom - 26, 2.2);
   }
 }
 
@@ -3993,8 +4016,10 @@ export function drawHotPotNode(scene, x, y, R) {
     tag.lineStyle(2, 0x8a5a3c, 1);
     tag.strokeRoundedRect(R * 0.5, -R * 0.05, R * 0.74, R * 0.62, 4);
     c.add(tag);
+    // Lettering on a tiny prop (the room itself shows 83 large): art, sized to
+    // the tag rather than to the type floor, which would burst it.
     c.add(scene.add.text(R * 0.87, R * 0.26, '83', style('caption', {
-      fontSize: Math.round(R * 0.38) + 'px', fill: '#8a3a1e', fontStyle: '900'
+      fontSize: Math.round(R * 0.38) + 'px', fill: '#8a3a1e', fontStyle: '900', art: true
     })).setOrigin(0.5));
   }
 
@@ -4430,9 +4455,10 @@ function drawNumberTag(g, node, scene) {
   cg.fillStyle(0xf5e2b8, 1);
   cg.fillRoundedRect(-54, -86, 108, 80, 6);
   card.add(cg);
-  // The number is 83, the family's number.
+  // The number is 83, the family's number. Lettering on the card: art, so it
+  // keeps the size that fills the card (the snap would take it down to 52).
   card.add(scene.add.text(0, -46, '83', style('caption', {
-    fontSize: '58px', fill: '#8a3a1e', fontStyle: '900'
+    fontSize: '58px', fill: '#8a3a1e', fontStyle: '900', art: true
   })).setOrigin(0.5));
   node.add(card);
   node.hpParts = { card };

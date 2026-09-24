@@ -8,7 +8,7 @@ import { music } from '../MusicManager.js';
 import { TransitionManager } from '../TransitionManager.js';
 import { createStarfield } from '../starfieldHelper.js';
 import { createIconButton, createButton } from '../buttonHelper.js';
-import { style, menuStyle } from '../textStyles.js';
+import { style, menuStyle, TYPE } from '../textStyles.js';
 import { drawArrowLeftIcon } from '../StatIcons.js';
 import { COLORS } from '../colorPalette.js';
 
@@ -40,7 +40,7 @@ export class SettingsScene extends Phaser.Scene {
     }).setDepth(15);
 
     this.add.text(W / 2, 80, 'SETTINGS', style('display', {
-      fontSize: '54px',
+      fontSize: `${TYPE.title}px`,
       fill: '#b6e0ff'
     })).setOrigin(0.5).setDepth(14);
 
@@ -55,7 +55,8 @@ export class SettingsScene extends Phaser.Scene {
     card.lineStyle(3, 0xb6e0ff, 0.7);
     card.strokeRoundedRect(cardX - cardW / 2, cardY - cardH / 2, cardW, cardH, 24);
 
-    this.add.text(cardX, cardY - cardH / 2 + 60, 'AUDIO', menuStyle('button', {
+    this.add.text(cardX, cardY - cardH / 2 + 70, 'AUDIO', menuStyle('button', {
+      fontSize: `${TYPE.heading}px`,
       fill: '#ffffff',
       fontStyle: '900'
     })).setOrigin(0.5).setDepth(12);

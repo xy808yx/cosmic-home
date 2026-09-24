@@ -24,7 +24,7 @@ import { music } from '../MusicManager.js';
 import { MUSIC_ASSETS } from '../MusicAssets.js';
 import { TransitionManager } from '../TransitionManager.js';
 import { createStarfield } from '../starfieldHelper.js';
-import { style } from '../textStyles.js';
+import { style, TYPE } from '../textStyles.js';
 import { COLORS } from '../colorPalette.js';
 import { companion, drawCompanion } from '../CompanionManager.js';
 import { ship } from '../ShipManager.js';
@@ -205,7 +205,7 @@ export class CreditsScene extends Phaser.Scene {
       bg.strokeRoundedRect(-cardW / 2, -cardH / 2, cardW, cardH, 28);
       card.add(bg);
       card.add(this.add.text(0, 0, text, style('subhead', {
-        fontSize: '34px',
+        fontSize: `${TYPE.body}px`,
         fill: '#ffeaa7',
         align: 'center',
         wordWrap: { width: cardW - 80 }
@@ -349,7 +349,7 @@ export class CreditsScene extends Phaser.Scene {
             audio.playEvolutionResolve?.();
             // Quick title card under the pet
             const tag = this.add.text(cx, cy + 200, 'COSMIC FORM', style('display', {
-              fontSize: '40px',
+              fontSize: `${TYPE.title}px`,
               fill: '#fbbf24',
               stroke: '#0a0a1a',
               strokeThickness: 4
@@ -391,10 +391,10 @@ export class CreditsScene extends Phaser.Scene {
     this.tweens.add({ targets: wash, alpha: 0.9, duration: 1500, ease: 'Quad.easeIn' });
 
     const lines = [
-      { t: 'CHAPTER 1 COMPLETE', size: 56, fill: '#fbbf24', y: 0.30, delay: 600 },
-      { t: 'The galaxy is bright again…', size: 38, fill: '#ffeaa7', y: 0.40, delay: 2200 },
-      { t: 'but something stirs at a scale\nyou cannot see.', size: 44, fill: '#ff7a8a', y: 0.52, delay: 4200 },
-      { t: 'Find the WARP GATE beside UNIVERSE\'S END\nand dive into INNER SPACE.', size: 32, fill: '#b5e6ff', y: 0.68, delay: 7000 }
+      { t: 'CHAPTER 1 COMPLETE', size: TYPE.title, fill: '#fbbf24', y: 0.30, delay: 600 },
+      { t: 'The galaxy is bright again…', size: TYPE.body, fill: '#ffeaa7', y: 0.40, delay: 2200 },
+      { t: 'but something stirs at a scale\nyou cannot see.', size: TYPE.heading, fill: '#ff7a8a', y: 0.52, delay: 4200 },
+      { t: 'Find the WARP GATE\nbeside UNIVERSE\'S END\nand dive into INNER SPACE.', size: TYPE.body, fill: '#b5e6ff', y: 0.70, delay: 7000 }
     ];
     lines.forEach(l => {
       const txt = this.add.text(W / 2, H * l.y, l.t, style('display', {
@@ -455,10 +455,10 @@ export class CreditsScene extends Phaser.Scene {
     this.tweens.add({ targets: wash, alpha: 0.94, duration: 1400, ease: 'Quad.easeIn' });
 
     const lines = [
-      { t: 'And that was the last of it.', size: 42, fill: '#fff3b8', y: 0.26, delay: 700 },
-      { t: 'Nothing left to fight.\nNot out in the stars. Not down in the smallest cell.', size: 34, fill: '#ffe0a0', y: 0.38, delay: 2600 },
-      { t: 'But you are a long way from home,\nand the light you switched back on\nis waiting for you there.', size: 36, fill: '#ffd27a', y: 0.55, delay: 5000 },
-      { t: 'Find the WARP GATE beside THE SINGULARITY CELL\nand take the long way home to HOME GROUND.', size: 30, fill: '#9be86b', y: 0.72, delay: 7800 }
+      { t: 'And that was the last of it.', size: TYPE.heading, fill: '#fff3b8', y: 0.19, delay: 700 },
+      { t: 'Nothing left to fight.\nNot out in the stars.\nNot down in the smallest cell.', size: TYPE.body, fill: '#ffe0a0', y: 0.29, delay: 2600 },
+      { t: 'But you are a long way from home,\nand the light you switched back on\nis waiting for you there.', size: TYPE.body, fill: '#ffd27a', y: 0.41, delay: 5000 },
+      { t: 'Find the WARP GATE\nbeside THE SINGULARITY CELL\nand take the long way home\nto HOME GROUND.', size: TYPE.body, fill: '#9be86b', y: 0.615, delay: 7800 }
     ];
     lines.forEach(l => {
       const txt = this.add.text(W / 2, H * l.y, l.t, style('display', {
@@ -478,7 +478,7 @@ export class CreditsScene extends Phaser.Scene {
     // portal rings. The cable is its own static graphic so the cabin can sway
     // from the wheel without dragging the cable with it.
     this.time.delayedCall(6200, () => {
-      const cx = W / 2, cy = H * 0.625;
+      const cx = W / 2, cy = H * 0.49;
       const cable = this.add.graphics().setDepth(83);
       cable.lineStyle(3, 0x000000, 0.22); cable.lineBetween(cx - 90 + 4, cy + 6, cx + 90 + 4, cy + 6);
       cable.lineStyle(3, CABIN_DARK, 0.9);  cable.lineBetween(cx - 90, cy, cx + 90, cy);
@@ -494,7 +494,7 @@ export class CreditsScene extends Phaser.Scene {
 
     // Nanocraft reward reveal: the hull is already equipped, this banner just
     // names the trophy. Sits between the last line and the button.
-    this.time.delayedCall(9000, () => this.showNanocraftBanner(H - 330, 86));
+    this.time.delayedCall(9000, () => this.showNanocraftBanner(H * 0.772, 86));
 
     this.time.delayedCall(10200, () => {
       const btn = createButton(this, {
@@ -508,18 +508,24 @@ export class CreditsScene extends Phaser.Scene {
   }
 
   // The "★ NANOCRAFT HULL UNLOCKED ★" banner (Chapter 2 finale reward).
+  // The box is sized from the two measured lines plus padding.
   showNanocraftBanner(y, depth) {
     const rc = this.add.container(W / 2, y).setDepth(depth);
     const rg = this.add.graphics();
-    rg.fillStyle(0x0a0a1a, 0.92); rg.fillRoundedRect(-300, -46, 600, 92, 18);
-    rg.lineStyle(3, 0x4ecdc4, 1); rg.strokeRoundedRect(-300, -46, 600, 92, 18);
-    rc.add(rg);
-    rc.add(this.add.text(0, -16, '★ NANOCRAFT HULL UNLOCKED ★', style('caption', {
-      fontSize: '26px', fill: '#4ecdc4', fontStyle: '900'
-    })).setOrigin(0.5));
-    rc.add(this.add.text(0, 18, 'Equipped! Build out the rest in the Shop.', style('caption', {
-      fontSize: '20px', fill: '#cfcfe0'
-    })).setOrigin(0.5));
+    const head = this.add.text(0, 0, '★ NANOCRAFT HULL UNLOCKED ★', style('caption', {
+      fontSize: `${TYPE.body}px`, fill: '#4ecdc4', fontStyle: '900'
+    })).setOrigin(0.5);
+    const sub = this.add.text(0, 0, 'Equipped! Build out the rest in the Shop.', style('body', {
+      fill: '#cfcfe0', align: 'center', wordWrap: { width: W - 200 }
+    })).setOrigin(0.5);
+    const padX = 44, padY = 22, gap = 6;
+    const bw = Math.min(W - 60, Math.ceil(Math.max(head.width, sub.width)) + padX * 2);
+    const bh = Math.ceil(head.height + gap + sub.height) + padY * 2;
+    head.y = -bh / 2 + padY + head.height / 2;
+    sub.y = bh / 2 - padY - sub.height / 2;
+    rg.fillStyle(0x0a0a1a, 0.92); rg.fillRoundedRect(-bw / 2, -bh / 2, bw, bh, 18);
+    rg.lineStyle(3, 0x4ecdc4, 1); rg.strokeRoundedRect(-bw / 2, -bh / 2, bw, bh, 18);
+    rc.add([rg, head, sub]);
     rc.alpha = 0;
     audio.playStardustChime?.();
     this.tweens.add({ targets: rc, alpha: 1, duration: 700, ease: 'Quad.easeOut' });
@@ -566,10 +572,10 @@ export class CreditsScene extends Phaser.Scene {
     // The headline sits in the violet band, so it gets a cream fill on a dusk
     // stroke; the lower lines sit on the afterglow and cream and keep dark fills.
     const lines = [
-      { t: 'CHAPTER 3 COMPLETE', size: 58, fill: '#ffe9a8', stroke: '#3a2a50', y: 0.14, delay: 800 },
-      { t: 'You made it!', size: 36, fill: '#5a4410', y: 0.62, delay: 2600 },
-      { t: 'You got to the very top!', size: 42, fill: '#4a3568', y: 0.69, delay: 4400 },
-      { t: 'The mountain is lit for the ride down.\nBelow you, one by one, the city lights come on.', size: 32, fill: '#1f5a6a', y: 0.78, delay: 6600 },
+      { t: 'CHAPTER 3 COMPLETE', size: TYPE.title, fill: '#ffe9a8', stroke: '#3a2a50', y: 0.14, delay: 800 },
+      { t: 'You made it!', size: TYPE.body, fill: '#5a4410', y: 0.615, delay: 2600 },
+      { t: 'You got to the very top!', size: TYPE.heading, fill: '#4a3568', y: 0.685, delay: 4400 },
+      { t: 'The mountain is lit for the ride down.\nBelow you, one by one,\nthe city lights come on.', size: TYPE.body, fill: '#1f5a6a', y: 0.775, delay: 6600 },
     ];
     lines.forEach(l => {
       const txt = this.add.text(W / 2, H * l.y, l.t, style('display', {
@@ -585,7 +591,7 @@ export class CreditsScene extends Phaser.Scene {
 
     // The personal message — the capstone of the whole game, soft and warm.
     this.time.delayedCall(8800, () => {
-      const msg = this.add.text(W / 2, H * 0.88, HERO_MESSAGE, style('display', {
+      const msg = this.add.text(W / 2, H * 0.872, HERO_MESSAGE, style('display', {
         fontSize: '64px', fill: '#c44b3a', stroke: '#fff6e0', strokeThickness: 5
       })).setOrigin(0.5).setDepth(71);
       msg.alpha = 0; msg.setScale(0.9);
@@ -602,7 +608,7 @@ export class CreditsScene extends Phaser.Scene {
     // "Home" button: back to the (now-complete) Home Ground map.
     this.time.delayedCall(10800, () => {
       const btn = createButton(this, {
-        x: W / 2, y: H - 140, label: 'Home',
+        x: W / 2, y: H - 122, label: 'Home',
         width: 340, height: 96, color: 0x4f8a3a,
         onClick: () => this.exitFinale()
       });

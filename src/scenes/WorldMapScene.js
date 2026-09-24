@@ -54,6 +54,22 @@ const HEADER_LAYOUT = {
 
 const PORTRAIT_SCALE_BY_STAGE = { egg: 2.4, baby: 2.4, teen: 2.0, adult: 2.0, cosmic: 2.6 };
 
+// Map text layout. Every name on the map is label size (36px); labels stay
+// inside a 24px gutter from the canvas edge. NODE_LABEL_DY is the gap from a
+// world node's centre to the centre of its name; NODE_DISC_R is roughly how
+// far a node's art reaches, used to keep labels and floating pills off it.
+const MAP_LABEL_PX = 36;
+const MAP_EDGE_GUTTER = 24;
+const NODE_LABEL_DY = 90;
+const NODE_DISC_R = 66;
+// The bottom world panel is at least this tall; a two-line description grows it
+// upward (createBottomChrome).
+const BOTTOM_CHROME_MIN_H = 220;
+// On the Chapter 3 paper map the pale accent names vanish, so names there print
+// in dark ink with a paper-white halo.
+const PAPER_LABEL_INK = '#2b2016';
+const PAPER_LABEL_HALO = '#fff8e7';
+
 export class WorldMapScene extends Phaser.Scene {
   constructor() {
     super({ key: 'WorldMapScene' });
@@ -118,13 +134,21 @@ export class WorldMapScene extends Phaser.Scene {
     this.furthestUnlockedIndex = this.findFurthestUnlockedIndex();
     this._mapFootprint = this.computeMapFootprint();
 
+    // Map text and art the floating pills (YOU ARE HERE, the arcade chip) must
+    // not cover. Filled in as the map builds; see placeFloatingChips.
+    this._mapLabels = [];
+    this._nodeDiscs = [];
+    this._obstacles = [];
+
     this.createHeader();
     this.createMap();
     this.createHiddenNodes();
     this.createChapterGates();
+    this.spreadMapLabels();
     this.createShipOnActiveWorld();
     this.createBottomChrome();
     this.createTuneUpNudge();
+    this.placeFloatingChips();
     this.maybeShowHomeGroundWelcome();
 
     // Warp arrival (from the warp asteroid) takes precedence over the
@@ -213,37 +237,8 @@ export class WorldMapScene extends Phaser.Scene {
 
     this.createChipRow();
 
-    // Cosmic Arcade chip — appears only after the kid has seen the endgame.
-    // Anchored to the bottom-right corner so it never collides with map nodes.
-    if (progress.endingSeen) {
-      const ax = W - 200, ay = 1640;
-      const arcade = this.add.container(ax, ay).setDepth(18);
-      const bg = this.add.graphics();
-      bg.fillStyle(0x0a0a1a, 0.95);
-      bg.fillRoundedRect(-150, -28, 300, 56, 18);
-      bg.lineStyle(3, 0xfbbf24, 1);
-      bg.strokeRoundedRect(-150, -28, 300, 56, 18);
-      arcade.add(bg);
-      arcade.add(this.add.text(0, 0, '★ COSMIC ARCADE ★', style('caption', {
-        fontSize: '24px',
-        fill: '#fbbf24',
-        fontStyle: '900'
-      })).setOrigin(0.5));
-      this.tweens.add({
-        targets: arcade,
-        scale: { from: 1, to: 1.06 },
-        duration: 1400,
-        yoyo: true,
-        repeat: -1,
-        ease: 'Sine.easeInOut'
-      });
-      const hit = this.add.rectangle(ax, ay, 300, 56, 0, 0)
-        .setInteractive({ useHandCursor: true }).setDepth(19);
-      hit.on('pointerdown', () => {
-        audio.playClick();
-        new TransitionManager(this).fadeToScene('ArcadeMenuScene');
-      });
-    }
+    // The Cosmic Arcade chip is placed once the map is built, so it can find a
+    // spot clear of the nodes and labels (see placeFloatingChips).
 
     // Top-left cluster: Settings (gear) | Logbook. Sound, Music and the
     // PIN-locked Grown-ups dashboard all live inside Settings.
@@ -419,9 +414,9 @@ export class WorldMapScene extends Phaser.Scene {
     opts.icon(iconG);
     c.add(iconG);
 
-    // Value text — bright white with stroke for readability on any backdrop
+    // Value text: bright white with stroke for readability on any backdrop
     const text = this.add.text(width / 2 - 22, 0, opts.value(), style('subhead', {
-      fontSize: '32px',
+      fontSize: `${MAP_LABEL_PX}px`,
       fill: '#ffffff',
       fontStyle: '900',
       stroke: '#0a0a18',
@@ -454,8 +449,17 @@ export class WorldMapScene extends Phaser.Scene {
   // INFO POPUP (chip tooltips)
   // ============================================================
   showInfoPopup({ accent, drawIcon, title, body }) {
-    const cw = 760;
-    const ch = 520;
+    const cw = 840;
+    // Body text first, so the card can grow to fit it: the icon and title take
+    // the top 310px, then the body, then 60px of margin.
+    const bodyText = this.add.text(0, 0, body, style('body', {
+      fontSize: '42px',
+      fill: '#cfcfe0',
+      align: 'center',
+      wordWrap: { width: cw - 100 },
+      lineSpacing: 8
+    })).setOrigin(0.5, 0);
+    const ch = Math.max(520, 310 + Math.ceil(bodyText.height) + 60);
     const { card } = createModal(this, {
       width: cw, height: ch, accentColor: accent, radius: 24, strokeWidth: 4
     });
@@ -488,13 +492,8 @@ export class WorldMapScene extends Phaser.Scene {
       strokeThickness: 3
     })).setOrigin(0.5));
 
-    card.add(this.add.text(0, iconY + 200, body, style('body', {
-      fontSize: '30px',
-      fill: '#cfcfe0',
-      align: 'center',
-      wordWrap: { width: cw - 80 },
-      lineSpacing: 8
-    })).setOrigin(0.5, 0));
+    bodyText.setPosition(0, iconY + 200);
+    card.add(bodyText);
   }
 
   // ============================================================
@@ -529,8 +528,10 @@ export class WorldMapScene extends Phaser.Scene {
       const pos = this.nodePositions[i];
       const isLocked = i > this.furthestUnlockedIndex;
 
+      this._nodeDiscs.push({ x: pos.x, y: pos.y, r: NODE_DISC_R, key: `w${world.id}` });
+
       if (isLocked) {
-        // Render silhouette only — no label, no hit, no animation.
+        // Render silhouette only: no label, no hit, no animation.
         const sil = drawWorldNode(this, pos.x, pos.y, world.id, { scale: 0.95, silhouette: true });
         sil.setDepth(5);
         sil.setAlpha(0.85);
@@ -559,6 +560,7 @@ export class WorldMapScene extends Phaser.Scene {
         badge.x = pos.x + 60;
         badge.y = pos.y - 60;
         drawStarIcon(badge, 0, 0, 18);
+        this._nodeDiscs.push({ x: badge.x, y: badge.y, r: 20, key: `w${world.id}`, soft: true });
         this.tweens.add({
           targets: badge,
           scale: { from: 0.9, to: 1.1 },
@@ -569,14 +571,10 @@ export class WorldMapScene extends Phaser.Scene {
         });
       }
 
-      // World label
-      const label = this.add.text(pos.x, pos.y + 90, world.name.toUpperCase(), style('caption', {
-        fontSize: '28px',
-        fill: '#' + world.accentColor.toString(16).padStart(6, '0'),
-        fontStyle: '900',
-        stroke: '#0a0a1a',
-        strokeThickness: 3
-      })).setOrigin(0.5).setDepth(6);
+      // World label, kept inside the edge gutter ("PARALLEL DIMENSION" at x=880
+      // would otherwise run off the right edge). spreadMapLabels nudges it
+      // sideways later if it lands on a neighbour.
+      this.addMapLabel(pos.x, pos.y + NODE_LABEL_DY, world.name, world.accentColor, `w${world.id}`);
 
       // Tap hit area
       const hit = this.add.circle(pos.x, pos.y, 90, 0x000000, 0)
@@ -590,7 +588,8 @@ export class WorldMapScene extends Phaser.Scene {
         this.tweens.add({ targets: node, scale: 0.95, duration: 120 });
       });
 
-      // Soft static halo + "YOU ARE HERE" chip for the current world
+      // Soft static halo for the current world. Its YOU ARE HERE pill is
+      // placed once the whole map is built (placeFloatingChips).
       if (isCurrent) {
         const halo = this.add.graphics().setDepth(3);
         halo.fillStyle(world.accentColor, 0.18);
@@ -599,34 +598,267 @@ export class WorldMapScene extends Phaser.Scene {
         halo.fillCircle(pos.x, pos.y, 130);
         halo.fillStyle(world.accentColor, 0.05);
         halo.fillCircle(pos.x, pos.y, 170);
-
-        // Flip the chip below the world when the world sits near the top
-        // of the map, where the header would otherwise crop the chip.
-        const chipAbove = pos.y > 480;
-        const chipY = chipAbove ? pos.y - 130 : pos.y + 140;
-        const chip = this.add.container(pos.x, chipY).setDepth(16);
-        const chipBg = this.add.graphics();
-        chipBg.fillStyle(world.accentColor, 0.95);
-        chipBg.fillRoundedRect(-92, -18, 184, 36, 18);
-        chipBg.lineStyle(2, 0x0a0a1a, 0.4);
-        chipBg.strokeRoundedRect(-92, -18, 184, 36, 18);
-        chip.add(chipBg);
-        const chipText = this.add.text(0, 0, 'YOU ARE HERE', style('caption', {
-          fontSize: '18px',
-          fill: '#0a0a1a',
-          fontStyle: '900'
-        })).setOrigin(0.5);
-        chip.add(chipText);
-        this.tweens.add({
-          targets: chip,
-          y: chipY - 4,
-          duration: 2400,
-          yoyo: true,
-          repeat: -1,
-          ease: 'Sine.easeInOut'
-        });
       }
     }
+  }
+
+  // A name printed on the map under a world, gate or secret. Label size, kept
+  // inside the edge gutter. On the Chapter 3 paper map the pale accent fills
+  // vanish, so names there are dark ink with a paper-white halo.
+  addMapLabel(x, y, name, accent, key) {
+    const onPaper = this.currentChapter === 3;
+    const label = this.add.text(x, y, name.toUpperCase(), style('caption', {
+      fontSize: `${MAP_LABEL_PX}px`,
+      fill: onPaper ? PAPER_LABEL_INK : hexStr(accent),
+      fontStyle: '900',
+      stroke: onPaper ? PAPER_LABEL_HALO : '#0a0a1a',
+      strokeThickness: onPaper ? 6 : 3
+    })).setOrigin(0.5).setDepth(6);
+    label.x = this.clampToGutter(x, label.width);
+    this._mapLabels.push({ text: label, key });
+    return label;
+  }
+
+  clampToGutter(x, width) {
+    const half = width / 2;
+    return Math.min(Math.max(x, MAP_EDGE_GUTTER + half), W - MAP_EDGE_GUTTER - half);
+  }
+
+  // Labels are 36px now, so a few land on a neighbouring label or node (THE
+  // SEAWALL on THE BREAD PLACE, DAD'S GARAGE on the Galactic Core). Slide each
+  // one sideways, up to 96px, only as far as it takes to clear (or to cover
+  // less), and leave it where it was when nothing helps. Nodes never move.
+  spreadMapLabels() {
+    const rectOf = (t) => t.getBounds();
+    const { RectangleToRectangle, CircleToRectangle } = Phaser.Geom.Intersects;
+    // The ship parks on the current world and draws over everything near it.
+    const here = this.nodePositions[this.currentWorldIndex];
+    const shipRect = here ? new Phaser.Geom.Rectangle(here.x - 60, here.y - 96, 120, 130) : null;
+    // Other labels, node art and the ship must be cleared; the little
+    // cleared-world stars (soft) are only avoided when a shift can manage it.
+    const cost = (lab) => {
+      const b = rectOf(lab.text);
+      let hard = 0;
+      let soft = 0;
+      for (const o of this._mapLabels) if (o !== lab && RectangleToRectangle(b, rectOf(o.text))) hard++;
+      for (const d of this._nodeDiscs) {
+        if (d.key === lab.key || !CircleToRectangle(new Phaser.Geom.Circle(d.x, d.y, d.r * 0.88), b)) continue;
+        if (d.soft) soft++; else hard++;
+      }
+      if (shipRect && RectangleToRectangle(b, shipRect)) hard++;
+      return hard * 100 + soft;
+    };
+    // Slide sideways by the smallest step that lowers the cost. A gate name
+    // that is still blocked (the ship parked on the world under the SURFACE
+    // gate) tries the same above its portal.
+    const search = (lab) => {
+      const home = lab.text.x;
+      let best = { x: home, c: cost(lab) };
+      for (let step = 8; step <= 96 && best.c > 0; step += 8) {
+        for (const dir of [-1, 1]) {
+          lab.text.x = this.clampToGutter(home + dir * step, lab.text.width);
+          const c = cost(lab);
+          if (c < best.c) best = { x: lab.text.x, c };
+        }
+      }
+      lab.text.x = home;
+      return best;
+    };
+    for (const lab of this._mapLabels) {
+      const homeY = lab.text.y;
+      let best = { ...search(lab), y: homeY };
+      if (best.c >= 100 && lab.altY != null) {
+        lab.text.y = lab.altY;
+        const alt = search(lab);
+        if (alt.c < best.c) best = { ...alt, y: lab.altY };
+      }
+      // Only move for a real gain: clear of every label, node and the ship, or
+      // fewer stars.
+      lab.text.setPosition(best.x, best.y);
+      // Where the parked ship still sits on a neighbour's name (NEBULA GARDENS
+      // while parked on the Crystal Planet), print that name above the ship
+      // (depth 20) so it stays readable.
+      if (shipRect && RectangleToRectangle(rectOf(lab.text), shipRect)) lab.text.setDepth(21);
+    }
+    // Obstacles for the floating pills, weighted by how bad covering them is:
+    // names most, node art (the middle of each disc) less, the little stars
+    // least. Chrome, the ship and the Tune-Up pill are added later, weighted
+    // so a pill never sits on them.
+    for (const lab of this._mapLabels) this.addObstacle(rectOf(lab.text), 6, 4);
+    for (const d of this._nodeDiscs) {
+      const r = d.r * 0.8;
+      this.addObstacle(new Phaser.Geom.Rectangle(d.x - r, d.y - r, r * 2, r * 2), 0, d.soft ? 0.5 : 1);
+    }
+
+    // Where the lowest world's name ends, whether or not it is unlocked yet
+    // (the first world always is, and every chapter's lowest node is its first).
+    const lowestY = Math.max(...this.nodePositions.map(p => p.y));
+    const labelH = this._mapLabels[0]?.text.height ?? MAP_LABEL_PX * 1.25;
+    this._lowestLabelBottom = lowestY + NODE_LABEL_DY + labelH / 2;
+  }
+
+  addObstacle(rect, pad = 0, weight = 1) {
+    const r = new Phaser.Geom.Rectangle(
+      rect.x - pad, rect.y - pad, rect.width + pad * 2, rect.height + pad * 2
+    );
+    r.weight = weight;
+    this._obstacles.push(r);
+  }
+
+  // How badly a w by h box centred at (x, y) covers the map's obstacles: the
+  // covered area of each, times its weight. 0 means clear.
+  coveredCost(x, y, w, h) {
+    const r = new Phaser.Geom.Rectangle(x - w / 2, y - h / 2, w, h);
+    let cost = 0;
+    for (const o of this._obstacles) {
+      const i = Phaser.Geom.Rectangle.Intersection(r, o);
+      cost += i.width * i.height * o.weight;
+    }
+    return cost;
+  }
+
+  // First candidate spot (kept inside the edge gutter) where a w by h box
+  // covers nothing; failing that, the one that covers least.
+  pickFreeSpot(w, h, candidates) {
+    let best = null;
+    for (const c of candidates) {
+      const x = this.clampToGutter(c.x, w);
+      const cost = this.coveredCost(x, c.y, w, h);
+      if (cost === 0) return { x, y: c.y };
+      if (!best || cost < best.cost) best = { x, y: c.y, cost };
+    }
+    return best;
+  }
+
+  // A spot for a w by h pill that belongs to the node at pos: the preferred
+  // spots first, when one is clear; otherwise the best spot within about 90px
+  // of the node, trading what it covers against how far it drifts.
+  pickSpotNearNode(w, h, pos, preferred) {
+    for (const c of preferred) {
+      const x = this.clampToGutter(c.x, w);
+      if (this.coveredCost(x, c.y, w, h) === 0) return { x, y: c.y };
+    }
+    let best = null;
+    for (let dy = -240; dy <= 200; dy += 12) {
+      for (let dx = -320; dx <= 320; dx += 16) {
+        const x = this.clampToGutter(pos.x + dx, w);
+        const y = pos.y + dy;
+        const nx = Math.max(x - w / 2, Math.min(pos.x, x + w / 2));
+        const ny = Math.max(y - h / 2, Math.min(pos.y, y + h / 2));
+        const drift = Math.hypot(nx - pos.x, ny - pos.y) - NODE_DISC_R;
+        if (drift > 90) continue;
+        const score = this.coveredCost(x, y, w, h) + 40 * Math.max(0, drift - 24);
+        if (!best || score < best.score) best = { x, y, score };
+      }
+    }
+    return best || { x: this.clampToGutter(preferred[0].x, w), y: preferred[0].y };
+  }
+
+  // The two pills that float over the map: YOU ARE HERE beside the current
+  // world, and (after the ending) the Cosmic Arcade chip. Both are sized from
+  // their text, so they are placed last, clear of every node, label, gate,
+  // secret, the ship, the Tune-Up pill, the header and the bottom panel.
+  placeFloatingChips() {
+    this.addObstacle(new Phaser.Geom.Rectangle(0, 0, W, MAP_HEADER_H), 10, 20);
+    this.addObstacle(new Phaser.Geom.Rectangle(0, this._bottomChromeTop, W, H - this._bottomChromeTop), 10, 20);
+    if (this._tuneUpRect) this.addObstacle(this._tuneUpRect, 10, 20);
+
+    const world = this.chapterWorlds[this.currentWorldIndex];
+    const pos = this.nodePositions[this.currentWorldIndex];
+    if (world && pos) {
+      // The parked ship covers the node from about 100px above its centre.
+      const shipRect = new Phaser.Geom.Rectangle(pos.x - 64, pos.y - 100, 128, 136);
+      this.addObstacle(shipRect, 6, 20);
+
+      const chip = this.add.container(0, 0).setDepth(16);
+      const chipText = this.add.text(0, 0, 'YOU ARE HERE', style('caption', {
+        fontSize: `${MAP_LABEL_PX}px`,
+        fill: '#0a0a1a',
+        fontStyle: '900'
+      })).setOrigin(0.5);
+      const cw = Math.ceil(chipText.width) + 44;
+      const ch = Math.ceil(chipText.height) + 14;
+      const chipBg = this.add.graphics();
+      chipBg.fillStyle(world.accentColor, 0.95);
+      chipBg.fillRoundedRect(-cw / 2, -ch / 2, cw, ch, ch / 2);
+      chipBg.lineStyle(2, 0x0a0a1a, 0.4);
+      chipBg.strokeRoundedRect(-cw / 2, -ch / 2, cw, ch, ch / 2);
+      chip.add(chipBg);
+      chip.add(chipText);
+
+      // Above the ship first (the old spot), then beside the node, then under
+      // its name. Near the top of the map the header rules out "above", and
+      // under the name would sit on the next world down, so it goes beside.
+      // Where the map is crowded (the Seawall, Supernova) it takes the nearby
+      // spot that covers the least.
+      const labelBottom = pos.y + NODE_LABEL_DY + ch / 2;
+      const beside = NODE_DISC_R + 30 + cw / 2;
+      const spot = this.pickSpotNearNode(cw, ch, pos, [
+        { x: pos.x, y: shipRect.y - 12 - ch / 2 },
+        { x: pos.x + beside, y: pos.y - 20 },
+        { x: pos.x - beside, y: pos.y - 20 },
+        { x: pos.x, y: labelBottom + 12 + ch / 2 }
+      ]);
+      chip.setPosition(spot.x, spot.y);
+      this.addObstacle(new Phaser.Geom.Rectangle(spot.x - cw / 2, spot.y - ch / 2, cw, ch), 8, 20);
+      this.tweens.add({
+        targets: chip,
+        y: spot.y - 4,
+        duration: 2400,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut'
+      });
+    }
+
+    if (progress.endingSeen) this.createArcadeChip();
+  }
+
+  // Cosmic Arcade chip: appears only after the kid has seen the endgame. Its
+  // home is the bottom-right corner, in the band above the world panel; when
+  // the Tune-Up pill has that band it moves up under the header instead.
+  createArcadeChip() {
+    const label = this.add.text(0, 0, '★ COSMIC ARCADE ★', style('caption', {
+      fontSize: `${MAP_LABEL_PX}px`,
+      fill: '#fbbf24',
+      fontStyle: '900'
+    })).setOrigin(0.5);
+    const aw = Math.ceil(label.width) + 48;
+    const ah = Math.ceil(label.height) + 18;
+    const band = (this._lowestLabelBottom + this._bottomChromeTop) / 2;
+    const right = W - MAP_EDGE_GUTTER - aw / 2;
+    const left = MAP_EDGE_GUTTER + aw / 2;
+    const underHeader = MAP_HEADER_H + 22 + ah / 2;
+    const candidates = [{ x: right, y: band }, { x: left, y: band }];
+    if (this._tuneUpRect) candidates.push({ x: right, y: this._tuneUpRect.y - 12 - ah / 2 });
+    candidates.push({ x: right, y: underHeader }, { x: left, y: underHeader });
+    for (let y = band - 40; y > underHeader; y -= 20) {
+      candidates.push({ x: right, y }, { x: left, y });
+    }
+    const { x: ax, y: ay } = this.pickFreeSpot(aw, ah, candidates);
+
+    const arcade = this.add.container(ax, ay).setDepth(18);
+    const bg = this.add.graphics();
+    bg.fillStyle(0x0a0a1a, 0.95);
+    bg.fillRoundedRect(-aw / 2, -ah / 2, aw, ah, 18);
+    bg.lineStyle(3, 0xfbbf24, 1);
+    bg.strokeRoundedRect(-aw / 2, -ah / 2, aw, ah, 18);
+    arcade.add(bg);
+    arcade.add(label);
+    this.tweens.add({
+      targets: arcade,
+      scale: { from: 1, to: 1.06 },
+      duration: 1400,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut'
+    });
+    const hit = this.add.rectangle(ax, ay, aw, ah, 0, 0)
+      .setInteractive({ useHandCursor: true }).setDepth(19);
+    hit.on('pointerdown', () => {
+      audio.playClick();
+      new TransitionManager(this).fadeToScene('ArcadeMenuScene');
+    });
   }
 
   // ============================================================
@@ -675,47 +907,69 @@ export class WorldMapScene extends Phaser.Scene {
   createBottomChrome() {
     // Subtle starfield band hint at bottom
     const fade = this.add.graphics().setDepth(0);
-    fade.fillStyle(COLORS.bgDark, 0.7);
-    fade.fillRect(0, 1700, W, 220);
 
     const world = this.chapterWorlds[this.currentWorldIndex];
     const wp = progress.getWorldProgress(world.id);
     const fullyCleared = progress.isWorldFullyCleared(world.id);
 
-    // Top hairline tinted to the current world's accent — frames the chrome
-    // the way the header's teal hairline frames the top.
-    const hairline = this.add.graphics().setDepth(11);
-    hairline.fillStyle(world.accentColor, 0.30);
-    hairline.fillRect(0, 1700, W, 2);
-
-    const nameText = this.add.text(W / 2, 1760, world.name, style('display', {
-      fontSize: '54px',
+    // Three rows: the world's name (heading), its description (body, and most
+    // Chapter 3 descriptions wrap to two lines) and the missions count (label).
+    // Built first so the band can be sized to them.
+    const nameText = this.add.text(W / 2, 0, world.name, style('display', {
+      fontSize: '52px',
       fill: '#ffffff'
     })).setOrigin(0.5).setDepth(11);
-    this.tweens.add({
-      targets: nameText,
-      y: 1758,
-      duration: 2400,
-      yoyo: true,
-      repeat: -1,
-      ease: 'Sine.easeInOut'
-    });
 
     const subtitle = fullyCleared
       ? 'World cleared. Replay any mission'
       : world.description;
-    this.add.text(W / 2, 1820, subtitle, style('body', {
-      fontSize: '38px',
+    const subText = this.add.text(W / 2, 0, subtitle, style('body', {
+      fontSize: '42px',
       fontStyle: '600',
       fill: '#' + world.accentColor.toString(16).padStart(6, '0'),
       align: 'center',
       wordWrap: { width: W - 160 }
     })).setOrigin(0.5).setDepth(11);
 
-    this.add.text(W / 2, 1880, `${wp.levelsCompleted}/${world.levelsRequired} missions complete`, style('caption', {
-      fontSize: '32px',
+    const missionsText = this.add.text(W / 2, 0, `${wp.levelsCompleted}/${world.levelsRequired} missions complete`, style('caption', {
+      fontSize: '36px',
       fill: '#cfcfe0'
     })).setOrigin(0.5).setDepth(11);
+
+    // The band is at least BOTTOM_CHROME_MIN_H tall and grows upward when the
+    // rows need more (a two-line description), with the spare height shared
+    // evenly above, between and below the rows.
+    const rows = [nameText, subText, missionsText];
+    const contentH = rows.reduce((sum, t) => sum + t.height, 0);
+    const bandH = Math.max(BOTTOM_CHROME_MIN_H, Math.ceil(contentH + 4 * 8));
+    const top = H - bandH;
+    const gap = (bandH - contentH) / 4;
+    let y = top + gap;
+    for (const t of rows) {
+      t.y = y + t.height / 2;
+      y += t.height + gap;
+    }
+    this._bottomChromeTop = top;
+
+    // The Chapter 3 paper map is light and busy, so the band is more solid
+    // there to keep the pale description and missions text readable.
+    fade.fillStyle(COLORS.bgDark, this.currentChapter === 3 ? 0.88 : 0.7);
+    fade.fillRect(0, top, W, bandH);
+
+    // Top hairline tinted to the current world's accent: frames the chrome
+    // the way the header's teal hairline frames the top.
+    const hairline = this.add.graphics().setDepth(11);
+    hairline.fillStyle(world.accentColor, 0.30);
+    hairline.fillRect(0, top, W, 2);
+
+    this.tweens.add({
+      targets: nameText,
+      y: nameText.y - 2,
+      duration: 2400,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut'
+    });
   }
 
   // Tune-Up nudge — the resurfacing call-to-action. Appears only once the kid has
@@ -728,25 +982,23 @@ export class WorldMapScene extends Phaser.Scene {
     if (rusty <= 0) return;
 
     // Centered in the clear band between the lowest node's on-map label and the
-    // bottom world-info chrome, so it crowds neither — in EVERY chapter. The
-    // chrome's top hairline is at y=1700 (see createBottomChrome). When the kid is
-    // parked on the lowest world (always true on a fresh Chapter-3 arrival — the
-    // case the old fixed y=1648 jammed against), that node's label drops to
-    // node.y + 90 + ~halfH; the lowest node sits at y≈1500 (Ch1) / 1480 (Ch2-3),
-    // so its label bottom reaches ~1610 worst case. Centering the compact pill in
-    // [1610, 1700] keeps clear gaps above (label) and below (chrome) everywhere.
+    // bottom world-info chrome, so it crowds neither, in EVERY chapter. The
+    // lowest node sits at y 1480 on every map (MapPath.js), so its label bottom
+    // (spreadMapLabels works it out, about 1593) is the band's top; the chrome's
+    // top hairline (createBottomChrome, 1686 to 1700) is its floor. The pill is
+    // a button, so its label is button size (42px): about 73px tall in a band
+    // of 93 to 107px.
     // (Keep the pill OUT of the top of the map: there its wide hit area stole taps
     // from the center finale node.)
     const label = `${rusty} fact${rusty === 1 ? '' : 's'} getting rusty · Tune-Up ↻`;
     const txt = this.add.text(0, 0, label, style('subhead', {
-      fontSize: '30px', fill: '#1a1a2e', fontStyle: '900'
+      fontSize: '42px', fill: '#1a1a2e', fontStyle: '900'
     })).setOrigin(0.5);
 
     const w = txt.width + 70;
-    const h = txt.height + 30;
-    const LABEL_BAND_TOP = 1610;     // worst-case lowest-node label bottom
-    const BOTTOM_CHROME_TOP = 1700;  // bottom world-info chrome (createBottomChrome)
-    const y = Math.round((LABEL_BAND_TOP + BOTTOM_CHROME_TOP) / 2);
+    const h = txt.height + 24;
+    const y = Math.round((this._lowestLabelBottom + this._bottomChromeTop) / 2);
+    this._tuneUpRect = new Phaser.Geom.Rectangle(W / 2 - w / 2, y - h / 2, w, h);
     const c = this.add.container(W / 2, y).setDepth(40);
 
     const bg = this.add.graphics();
@@ -979,11 +1231,12 @@ export class WorldMapScene extends Phaser.Scene {
       duration: 1400, yoyo: true, repeat: -1, ease: 'Sine.easeInOut'
     });
 
-    this.add.text(pos.x, pos.y + R + 24, label, style('caption', {
-      fontSize: '22px',
-      fill: '#' + accent.toString(16).padStart(6, '0'),
-      fontStyle: '900', stroke: '#0a0a1a', strokeThickness: 3
-    })).setOrigin(0.5).setDepth(6);
+    // Gate name: the same label as a world, clamped inside the edge gutter
+    // (the Chapter 3 gate sits at x=150).
+    const key = `g${pos.x},${pos.y}`;
+    this._nodeDiscs.push({ x: pos.x, y: pos.y, r: R + 12, key });
+    this.addMapLabel(pos.x, pos.y + R + 24, label, accent, key);
+    this._mapLabels[this._mapLabels.length - 1].altY = pos.y - R - 24;
     const hit = this.add.circle(pos.x, pos.y, R + 12, 0, 0)
       .setInteractive({ useHandCursor: true }).setDepth(7);
     hit.on('pointerdown', onTap);
@@ -1095,26 +1348,34 @@ export class WorldMapScene extends Phaser.Scene {
     cabin.fillRoundedRect(-46, CY - 47, 26, 5, 2);
     card.add(cabin);
 
-    card.add(this.add.text(0, -180, 'HOME GROUND', style('display', {
+    // Stacked top down from under the cabin, each block placed by its measured
+    // height so the body-size lines never crowd the headline.
+    const title = this.add.text(0, 0, 'HOME GROUND', style('display', {
       fontSize: '72px', fill: '#ffd27a', fontStyle: '900',
       stroke: '#1a1208', strokeThickness: 5
-    })).setOrigin(0.5));
-    card.add(this.add.text(0, -105, 'You made it home.', style('subhead', {
-      fontSize: '38px', fill: '#9be86b'
-    })).setOrigin(0.5));
+    })).setOrigin(0.5, 0);
+    const tagline = this.add.text(0, 0, 'You made it home.', style('subhead', {
+      fontSize: '42px', fill: '#9be86b'
+    })).setOrigin(0.5, 0);
     // The owner's own words. Three short lines, each under 40 characters so
-    // nothing wraps at 34px inside 860px. This is the whole point of the card:
+    // nothing wraps at 42px inside 860px. This is the whole point of the card:
     // it names the change of genre out loud (no more fighting) before she meets
     // the first calm belt, so the quiet reads as the story and not as a bug.
-    card.add(this.add.text(0, 12,
+    const story = this.add.text(0, 0,
       'Time to relax. Time to enjoy.\nNo more fighting, no more dark.\nJust exploring the city together.',
       style('body', {
-        fontSize: '34px', fill: '#fff3b8', align: 'center',
+        fontSize: '42px', fill: '#fff3b8', align: 'center',
         lineSpacing: 12, wordWrap: { width: W - 220 }
-      })).setOrigin(0.5));
-    card.add(this.add.text(0, 168, 'Take your time.\nNothing here is chasing you.', style('body', {
-      fontSize: '30px', fill: '#e8e8d0', align: 'center', lineSpacing: 10
-    })).setOrigin(0.5));
+      })).setOrigin(0.5, 0);
+    const calm = this.add.text(0, 0, 'Take your time.\nNothing here is chasing you.', style('body', {
+      fontSize: '42px', fill: '#e8e8d0', align: 'center', lineSpacing: 10
+    })).setOrigin(0.5, 0);
+    let ty = CY + 50;
+    for (const [t, gapBelow] of [[title, 4], [tagline, 28], [story, 32], [calm, 0]]) {
+      t.y = ty;
+      ty += t.height + gapBelow;
+      card.add(t);
+    }
 
     this.tweens.add({ targets: card, scale: 1, alpha: 1, duration: 420, ease: 'Back.easeOut' });
     audio.playStar?.();
@@ -1231,33 +1492,29 @@ export class WorldMapScene extends Phaser.Scene {
         });
       }
 
-      // Label — sits below the larger node.
+      // Label: sits below the larger node.
       //
       // Hidden nodes sit in the map's edge pockets by design, so a long secret
       // name centred on the node can run off the canvas ("THE NIGHT SHIFT" at
-      // x=975 overflowed the right edge by 2px). Clamp the label's CENTRE so the
-      // whole string stays inside a 24px gutter — the node itself stays where the
-      // layout put it, and the label slides only as far as it must. Applies to
-      // every secret, so a future long name can't reintroduce the same bug.
-      const label = this.add.text(pos.x, pos.y + NODE_R + 22, h.name.toUpperCase(), style('caption', {
-        fontSize: '24px',
-        fill: hexStr(h.accentColor),
-        fontStyle: '900',
-        stroke: '#0a0a1a',
-        strokeThickness: 3
-      })).setOrigin(0.5).setDepth(6);
-      const gutter = 24;
-      const half = label.width / 2;
-      label.x = Math.min(Math.max(pos.x, gutter + half), W - gutter - half);
+      // x=975 overflowed the right edge by 2px). addMapLabel clamps the label's
+      // CENTRE so the whole string stays inside the 24px gutter; the node itself
+      // stays where the layout put it, and the label slides only as far as it
+      // must. Applies to every secret, so a future long name can't reintroduce
+      // the same bug.
+      this._nodeDiscs.push({ x: pos.x, y: pos.y, r: NODE_R + 4, key: `h${h.id}` });
+      this.addMapLabel(pos.x, pos.y + NODE_R + 26, h.name, h.accentColor, `h${h.id}`);
 
       // Gauntlet secrets (Glitch World, King Coli) have no Level Select screen
       // to surface their rating, so show the boss star score (levelStars[1], 0-3)
-      // right under the node label — otherwise a 3-star win records but never
+      // right under the node label; otherwise a 3-star win records but never
       // displays anywhere. Exploration secrets (Garage, Recess) have no stars.
       if (h.kind === 'gauntlet') {
         const best = progress.worldProgress[h.id]?.levelStars?.[1] || 0;
         const starGap = 46;
-        const starY = pos.y + NODE_R + 64;
+        const starY = pos.y + NODE_R + 76;
+        this._nodeDiscs.push({ x: pos.x, y: starY, r: 20, key: `h${h.id}` });
+        this._nodeDiscs.push({ x: pos.x - starGap, y: starY, r: 20, key: `h${h.id}` });
+        this._nodeDiscs.push({ x: pos.x + starGap, y: starY, r: 20, key: `h${h.id}` });
         for (let s = 0; s < 3; s++) {
           const sg = this.add.graphics().setDepth(6);
           if (s < best) drawStarIcon(sg, 0, 0, 16);
@@ -1589,34 +1846,45 @@ export class WorldMapScene extends Phaser.Scene {
   }) {
     const accentHex = '#' + accent.toString(16).padStart(6, '0');
 
-    // Build the text(s) first so we can size the pill to fit any label.
-    const labelText = this.add.text(0, subtitle ? -14 : 0, label, style('caption', {
-      fontSize: '20px',
+    // Build the text(s) first so we can size the pill to fit any label. The
+    // headline is body size (it has to read in the 2.2s it shows); the secret
+    // world's name under it is label size.
+    const labelText = this.add.text(0, 0, label, style('caption', {
+      fontSize: '42px',
       fill: accentHex,
       fontStyle: '900'
     })).setOrigin(0.5);
     let subtitleText = null;
     if (subtitle) {
-      subtitleText = this.add.text(0, 16, subtitle, style('caption', {
-        fontSize: '16px',
+      subtitleText = this.add.text(0, 0, subtitle, style('caption', {
+        fontSize: '36px',
         fill: subtitleColor,
         fontStyle: '900'
       })).setOrigin(0.5);
     }
 
     const padX = 28;
+    const padY = 12;
     const widestText = subtitleText
       ? Math.max(labelText.width, subtitleText.width)
       : labelText.width;
     const halfW = Math.max(140, Math.ceil(widestText / 2) + padX);
-    const halfH = subtitle ? 38 : 22;
+    const contentH = labelText.height + (subtitleText ? subtitleText.height : 0);
+    const halfH = Math.ceil(contentH / 2) + padY;
+    labelText.y = -contentH / 2 + labelText.height / 2;
+    if (subtitleText) subtitleText.y = contentH / 2 - subtitleText.height / 2;
 
     // Keep the pill on-screen even when the target node sits near the canvas
     // edge (Glitch lives at x=970, only ~110px from the right edge).
     const margin = 12;
     const clampedX = Math.max(halfW + margin, Math.min(W - halfW - margin, x));
 
-    const tip = this.add.container(clampedX, y - 150).setDepth(18);
+    // Above the ship (which reaches about 95px above the node), rising 10px as
+    // it fades in. A world near the top of the map would push it into the
+    // header, so there it drops under the node's name instead.
+    let tipY = y - 104 - halfH;
+    if (tipY - 10 - halfH < MAP_HEADER_H + 10) tipY = y + NODE_LABEL_DY + 40 + halfH;
+    const tip = this.add.container(clampedX, tipY).setDepth(18);
     const bg = this.add.graphics();
     bg.fillStyle(0x0a0a1a, 0.92);
     bg.fillRoundedRect(-halfW, -halfH, halfW * 2, halfH * 2, 12);
@@ -1669,27 +1937,47 @@ export class WorldMapScene extends Phaser.Scene {
   // ============================================================
   // TOAST (fading status text bottom-of-screen)
   // ============================================================
-  showToast(message) {
-    const toast = this.add.container(W / 2, H - 240).setDepth(120);
-    const bg = this.add.graphics();
-    bg.fillStyle(0x0a0a1a, 0.94);
-    bg.fillRoundedRect(-280, -36, 560, 72, 20);
-    bg.lineStyle(2, 0xfbbf24, 0.95);
-    bg.strokeRoundedRect(-280, -36, 560, 72, 20);
-    toast.add(bg);
-    toast.add(this.add.text(0, 0, message, style('subhead', {
-      fontSize: '28px',
+  // y, when given, is where the toast rests (a toast fired from inside a card
+  // sits under the card instead of on its buttons).
+  showToast(message, { y } = {}) {
+    const toast = this.add.container(W / 2, 0).setDepth(120);
+    // Body size; the box is sized from the text. A message too long for one
+    // line splits into two lines of about equal length rather than leaving
+    // one word on its own.
+    const txt = this.add.text(0, 0, message, style('subhead', {
+      fontSize: '42px',
       fill: '#ffeaa7',
-      fontStyle: '900'
-    })).setOrigin(0.5));
+      fontStyle: '900',
+      align: 'center'
+    })).setOrigin(0.5);
+    const maxW = W - 180;
+    if (txt.width > maxW) {
+      const lines = Math.ceil(txt.width / maxW);
+      txt.setWordWrapWidth(Math.min(maxW, Math.ceil(txt.width / lines) + 60));
+    }
+    const bw = Math.ceil(txt.width) + 80;
+    const bh = Math.ceil(txt.height) + 32;
+    const bg = this.add.graphics();
+    // Opaque, so nothing under it (a card's close hint) shows through.
+    bg.fillStyle(0x0a0a1a, 1);
+    bg.fillRoundedRect(-bw / 2, -bh / 2, bw, bh, 20);
+    bg.lineStyle(2, 0xfbbf24, 0.95);
+    bg.strokeRoundedRect(-bw / 2, -bh / 2, bw, bh, 20);
+    toast.add(bg);
+    toast.add(txt);
+    // Rests 20px above the bottom world panel (which grows for a two-line
+    // description), rising 50px as it fades in.
+    const panelTop = this._bottomChromeTop ?? H - BOTTOM_CHROME_MIN_H;
+    const restY = y ?? Math.min(H - 290, panelTop - 20 - bh / 2);
+    toast.y = restY + 50;
     toast.alpha = 0;
     this.tweens.add({
-      targets: toast, alpha: 1, y: H - 290,
+      targets: toast, alpha: 1, y: restY,
       duration: 240, ease: 'Quad.easeOut'
     });
     this.time.delayedCall(1800, () => {
       this.tweens.add({
-        targets: toast, alpha: 0, y: H - 240,
+        targets: toast, alpha: 0, y: restY + 50,
         duration: 360,
         onComplete: () => toast.destroy()
       });
@@ -1730,17 +2018,21 @@ export class WorldMapScene extends Phaser.Scene {
       fontSize: '60px',
       fill: '#ffffff',
     })).setOrigin(0.5));
-    card.add(this.add.text(0, -ch / 2 + 175, 'Tap a friend to bring them out, then pick their form.', style('body', {
-      fontSize: '28px',
+    // Body-size hint, two lines, hung from under the title.
+    card.add(this.add.text(0, -ch / 2 + 140, 'Tap a friend to bring them out, then pick their form.', style('body', {
+      fontSize: '42px',
       fill: '#cfcfe0',
       align: 'center',
       wordWrap: { width: cw - 120 },
-    })).setOrigin(0.5));
+    })).setOrigin(0.5, 0));
 
     const activeId = progress.companion?.speciesId;
-    const cardW = 280;
-    const cardH = 760;
-    const gap = 36;
+    // Cards are a little wider than before so a body-size tagline keeps its
+    // longest word ("Liquid-metal") inside the card, and taller so up to four
+    // tagline lines clear the ACTIVE pill.
+    const cardW = 296;
+    const cardH = 800;
+    const gap = 24;
     const totalW = cardW * 3 + gap * 2;
     const startX = -totalW / 2 + cardW / 2;
     const rowY = -ch / 2 + 270 + cardH / 2;
@@ -1766,30 +2058,24 @@ export class WorldMapScene extends Phaser.Scene {
       sub.add(portrait);
 
       sub.add(this.add.text(0, -cardH / 2 + 420, sp.name, style('display', {
-        fontSize: '46px',
+        fontSize: '52px',
         fill: '#' + sp.color.toString(16).padStart(6, '0'),
       })).setOrigin(0.5));
 
-      sub.add(this.add.text(0, -cardH / 2 + 490, sp.tagline, style('caption', {
-        fontSize: '20px',
+      // Tagline hangs from under the name so extra lines grow downward.
+      sub.add(this.add.text(0, -cardH / 2 + 462, sp.tagline, style('body', {
+        fontSize: '42px',
         fill: '#cfcfe0',
         align: 'center',
-        wordWrap: { width: cardW - 44 },
-      })).setOrigin(0.5));
+        lineSpacing: 4,
+        wordWrap: { width: cardW - 28 },
+      })).setOrigin(0.5, 0));
 
       if (isActive) {
-        const chip = this.add.container(0, cardH / 2 - 62);
-        const cbg = this.add.graphics();
-        cbg.fillStyle(0x58d68d, 0.95);
-        cbg.fillRoundedRect(-95, -26, 190, 52, 26);
-        chip.add(cbg);
-        chip.add(this.add.text(0, 0, '✓ ACTIVE', style('subhead', {
-          fontSize: '24px', fill: '#0a0a1a', fontStyle: '900',
-        })).setOrigin(0.5));
-        sub.add(chip);
+        this.addActivePill(sub, 0, cardH / 2 - 56);
       } else {
-        sub.add(this.add.text(0, cardH / 2 - 62, 'Tap to choose', style('caption', {
-          fontSize: '22px', fill: '#9a9aae',
+        sub.add(this.add.text(0, cardH / 2 - 56, 'Tap to choose', style('body', {
+          fontSize: '42px', fill: '#cfcfe0',
         })).setOrigin(0.5));
       }
 
@@ -1815,12 +2101,29 @@ export class WorldMapScene extends Phaser.Scene {
       label: '🥚 RAISE A BRAND-NEW PET',
       color: COLORS.accentWarm,
       textStyle: 'subhead',
-      textOverrides: { fontSize: '26px', fill: '#0a0a1a', fontStyle: '900' },
+      textOverrides: { fontSize: '42px', fill: '#0a0a1a', fontStyle: '900' },
       onClick: () => {
         close();
         this.scene.start('StarterPickerScene');
       },
     }));
+  }
+
+  // Green "✓ ACTIVE" pill (label size), sized from its text, added to parent.
+  addActivePill(parent, x, y) {
+    const chip = this.add.container(x, y);
+    const txt = this.add.text(0, 0, '✓ ACTIVE', style('subhead', {
+      fontSize: `${MAP_LABEL_PX}px`, fill: '#0a0a1a', fontStyle: '900',
+    })).setOrigin(0.5);
+    const pw = Math.ceil(txt.width) + 56;
+    const ph = Math.ceil(txt.height) + 14;
+    const cbg = this.add.graphics();
+    cbg.fillStyle(0x58d68d, 0.95);
+    cbg.fillRoundedRect(-pw / 2, -ph / 2, pw, ph, ph / 2);
+    chip.add(cbg);
+    chip.add(txt);
+    parent.add(chip);
+    return chip;
   }
 
   showStageCarousel() {
@@ -1915,26 +2218,33 @@ export class WorldMapScene extends Phaser.Scene {
 
       const nameY = -ch / 2 + 820;
       const displayName = isLocked ? '???' : (stageLore.name || '').toUpperCase();
-      pane.add(this.add.text(0, nameY, displayName, style('display', {
+      const nameText = this.add.text(0, nameY, displayName, style('display', {
         fontSize: '64px',
         fill: '#ffffff',
-      })).setOrigin(0.5));
+      })).setOrigin(0.5);
+      pane.add(nameText);
 
-      pane.add(this.add.text(0, nameY + 60, `· ${stage.toUpperCase()} ·`, style('caption', {
-        fontSize: '30px',
+      // Stage tag and lore stack under the name by their measured heights, so
+      // the label-size tag never touches the name. The longest lore is three
+      // lines, which still clears the button below.
+      const tagText = this.add.text(0, 0, `· ${stage.toUpperCase()} ·`, style('caption', {
+        fontSize: '36px',
         fill: '#' + sp.accent.toString(16).padStart(6, '0'),
-      })).setOrigin(0.5));
+      })).setOrigin(0.5, 0);
+      tagText.y = nameY + nameText.height / 2 + 8;
+      pane.add(tagText);
 
+      // Body-size lore. Locked text stays the readable gray.
       const loreText = isLocked
         ? 'Keep playing to unlock this form.'
         : (stageLore.lore || '');
-      pane.add(this.add.text(0, nameY + 150, loreText, style('body', {
-        fontSize: '32px',
-        fill: isLocked ? '#9a9aae' : '#cfcfe0',
+      pane.add(this.add.text(0, tagText.y + tagText.height + 16, loreText, style('body', {
+        fontSize: '42px',
+        fill: '#cfcfe0',
         align: 'center',
         wordWrap: { width: cw - 100 },
         lineSpacing: 8,
-      })).setOrigin(0.5));
+      })).setOrigin(0.5, 0));
 
       const btnY = ch / 2 - 260;
       if (!isLocked && !isActive) {
@@ -1944,11 +2254,12 @@ export class WorldMapScene extends Phaser.Scene {
           label: 'Set as my pet',
           color: sp.accent,
           textStyle: 'subhead',
-          textOverrides: { fontSize: '30px', fill: '#0a0a1a', fontStyle: '900' },
+          textOverrides: { fontSize: '42px', fill: '#0a0a1a', fontStyle: '900' },
           onClick: () => {
             companion.setDisplayStage(stage);
             this.refreshPetBadge();
-            this.showToast(`Now showing: ${stageLore.name}`);
+            // Under the card, over its close hint, clear of both buttons.
+            this.showToast(`Now showing: ${stageLore.name}`, { y: H / 2 + ch / 2 + 60 });
             // Replace the current pane so the button flips to "✓ ACTIVE".
             const fresh = buildStagePane(idx);
             card.add(fresh);
@@ -1958,15 +2269,7 @@ export class WorldMapScene extends Phaser.Scene {
           },
         }));
       } else if (!isLocked && isActive) {
-        const chip = this.add.container(0, btnY);
-        const cbg = this.add.graphics();
-        cbg.fillStyle(0x58d68d, 0.95);
-        cbg.fillRoundedRect(-130, -28, 260, 56, 28);
-        chip.add(cbg);
-        chip.add(this.add.text(0, 0, '✓ ACTIVE', style('subhead', {
-          fontSize: '26px', fill: '#0a0a1a', fontStyle: '900',
-        })).setOrigin(0.5));
-        pane.add(chip);
+        this.addActivePill(pane, 0, btnY);
       }
 
       if (companion.isFullyEvolved()) {
@@ -1976,7 +2279,7 @@ export class WorldMapScene extends Phaser.Scene {
           label: 'RAISE ANOTHER COMPANION',
           color: COLORS.accentWarm,
           textStyle: 'subhead',
-          textOverrides: { fontSize: '24px', fill: '#0a0a1a', fontStyle: '900' },
+          textOverrides: { fontSize: '42px', fill: '#0a0a1a', fontStyle: '900' },
           onClick: () => this.confirmRaiseAnother(),
         }));
       }
@@ -2019,41 +2322,53 @@ export class WorldMapScene extends Phaser.Scene {
 
   confirmRaiseAnother() {
     const sp = companion.getSpecies();
+    // Heading and body built first; the card is sized to them: 70px margin,
+    // heading, 40px, body, 60px, the 92px button row, 70px margin.
+    const cw = 900;
+    const heading = this.add.text(0, 0, 'RAISE A NEW COMPANION?', style('display', {
+      fontSize: '52px',
+      fill: '#ffd86b',
+      stroke: '#0a0a1a',
+      strokeThickness: 5,
+      align: 'center',
+      wordWrap: { width: cw - 80 }
+    })).setOrigin(0.5, 0);
+    const body = this.add.text(0, 0, `${sp?.stages?.adult?.name || 'Your pet'} will retire to your trophy shelf.\nYou'll pick a brand-new starter and raise it from an egg.\n\nYour cosmetics and ship stay with you.`, style('body', {
+      fontSize: '42px',
+      fill: '#cfcfe0',
+      align: 'center',
+      wordWrap: { width: cw - 100 },
+      lineSpacing: 8
+    })).setOrigin(0.5, 0);
+    const btnH = 92;
+    const ch = Math.max(700, Math.ceil(70 + heading.height + 40 + body.height + 60 + btnH + 70));
     const { card, close } = createModal(this, {
-      width: 820, height: 700,
+      width: cw, height: ch,
       accentColor: COLORS.accentWarm,
       radius: 24, strokeWidth: 4,
       overlayAlpha: 0.92,
       closeOnCardTap: false,
       showCloseHint: false
     });
-    card.add(this.add.text(0, -240, 'RAISE A NEW COMPANION?', style('display', {
-      fontSize: '44px',
-      fill: '#ffd86b',
-      stroke: '#0a0a1a',
-      strokeThickness: 5,
-      align: 'center'
-    })).setOrigin(0.5));
-    card.add(this.add.text(0, -100, `${sp?.stages?.adult?.name || 'Your pet'} will retire to your trophy shelf.\nYou'll pick a brand-new starter and raise it from an egg.\n\nYour cosmetics and ship stay with you.`, style('body', {
-      fontSize: '26px',
-      fill: '#cfcfe0',
-      align: 'center',
-      wordWrap: { width: 700 },
-      lineSpacing: 8
-    })).setOrigin(0.5));
+    heading.y = -ch / 2 + 70;
+    body.y = heading.y + heading.height + 40;
+    card.add(heading);
+    card.add(body);
+    const btnY = ch / 2 - 70 - btnH / 2;
 
     card.add(createButton(this, {
-      x: -180, y: 220, width: 280, height: 92,
+      x: -180, y: btnY, width: 280, height: btnH,
       label: 'CANCEL',
       color: 0x6a6a8e,
-      textOverrides: { fontSize: '26px', fill: '#0a0a1a', fontStyle: '900' },
+      // White reads better than dark ink on this mid-gray face.
+      textOverrides: { fontSize: '42px', fill: '#ffffff', fontStyle: '900' },
       onClick: () => close()
     }));
     card.add(createButton(this, {
-      x: 180, y: 220, width: 320, height: 92,
+      x: 180, y: btnY, width: 320, height: btnH,
       label: "LET'S DO IT",
       color: COLORS.accentWarm,
-      textOverrides: { fontSize: '26px', fill: '#0a0a1a', fontStyle: '900' },
+      textOverrides: { fontSize: '42px', fill: '#0a0a1a', fontStyle: '900' },
       onClick: () => {
         companion.retireAndStartNew();
         close();
@@ -2082,31 +2397,36 @@ export class WorldMapScene extends Phaser.Scene {
     card.add(portrait);
 
     // Name (much bigger)
-    card.add(this.add.text(0, -ch / 2 + 500, lore.name.toUpperCase(), style('display', {
+    const nameY = -ch / 2 + 500;
+    const nameText = this.add.text(0, nameY, lore.name.toUpperCase(), style('display', {
       fontSize: '68px',
       fill: '#ffffff'
-    })).setOrigin(0.5));
-    // Type tag
-    card.add(this.add.text(0, -ch / 2 + 560, lore.type, style('caption', {
-      fontSize: '32px',
+    })).setOrigin(0.5);
+    card.add(nameText);
+    // Type tag, hung from under the name by its measured height so the two
+    // never touch.
+    const typeText = this.add.text(0, nameY + nameText.height / 2 + 8, lore.type, style('caption', {
+      fontSize: '36px',
       fill: '#' + sp.accent.toString(16).padStart(6, '0')
-    })).setOrigin(0.5));
-    // Lore description (bigger, more line spacing)
-    card.add(this.add.text(0, -ch / 2 + 660, lore.lore, style('body', {
-      fontSize: '34px',
+    })).setOrigin(0.5, 0);
+    card.add(typeText);
+    // Lore description: body size, hung from under the type tag so its three
+    // lines grow down into the gap above "Next stage".
+    card.add(this.add.text(0, typeText.y + typeText.height + 16, lore.lore, style('body', {
+      fontSize: '42px',
       fill: '#cfcfe0',
       align: 'center',
       wordWrap: { width: cw - 100 },
       lineSpacing: 8
-    })).setOrigin(0.5));
+    })).setOrigin(0.5, 0));
 
-    // Evolution progress block — sits in lower third of card
+    // Evolution progress block: sits in lower third of card
     const prog = companion.getStageProgress();
     const py = ch / 2 - 600;
     if (prog.nextStage) {
       const nextLore = sp.stages[prog.nextStage];
       card.add(this.add.text(0, py, `Next stage: ${nextLore.name}`, style('subhead', {
-        fontSize: '34px',
+        fontSize: '42px',
         fill: '#ffffff'
       })).setOrigin(0.5));
 
@@ -2125,15 +2445,16 @@ export class WorldMapScene extends Phaser.Scene {
       goals.forEach((g, i) => {
         const gy = goalsStartY + i * 56;
         card.add(this.add.text(0, gy, g, style('caption', {
-          fontSize: '30px',
+          fontSize: '36px',
           fill: '#cfcfe0'
         })).setOrigin(0.5));
       });
 
-      // Overall progress bar — sits with its own band, well above card edge
+      // Overall progress bar: sits with its own band, well above card edge.
+      // 56px tall so its label-size percent (36px) fits inside the bar.
       const barW = cw - 200;
-      const barH = 36;
-      const barY = goalsStartY + 3 * 56 + 30 + barH / 2;
+      const barH = 56;
+      const barY = goalsStartY + 3 * 56 + 20 + barH / 2;
       const pct = Math.round(Math.min(1, prog.ratio) * 100);
       const bar = createProgressBar(this, {
         x: 0, y: barY,
@@ -2147,25 +2468,25 @@ export class WorldMapScene extends Phaser.Scene {
     } else {
       // Adult — show trophy count + "Raise another companion" CTA
       card.add(this.add.text(0, py, 'FULLY EVOLVED', style('subhead', {
-        fontSize: '40px',
+        fontSize: '52px',
         fill: '#ffd86b'
       })).setOrigin(0.5));
 
       const completedCount = companion.getCompletedPets().length;
       if (completedCount > 0) {
-        card.add(this.add.text(0, py + 60, `Trophy shelf: ${completedCount}`, style('caption', {
-          fontSize: '28px',
+        card.add(this.add.text(0, py + 70, `Trophy shelf: ${completedCount}`, style('caption', {
+          fontSize: '36px',
           fill: '#cfcfe0'
         })).setOrigin(0.5));
       }
 
-      // CTA button — uses createButton for consistency
+      // CTA button: uses createButton for consistency
       const btn = createButton(this, {
         x: 0, y: py + 200, width: 580, height: 96,
         label: 'RAISE ANOTHER COMPANION',
         color: COLORS.accentWarm,
         textStyle: 'subhead',
-        textOverrides: { fontSize: '28px', fill: '#0a0a1a', fontStyle: '900' },
+        textOverrides: { fontSize: '42px', fill: '#0a0a1a', fontStyle: '900' },
         onClick: () => {
           companion.retireAndStartNew();
           close();

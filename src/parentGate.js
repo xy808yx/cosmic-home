@@ -29,7 +29,8 @@ const H = 1920;
 const TITLE_Y = 240;
 const LINE_Y = 320;
 const ENTRY_Y = 460;
-const STATUS_Y = 575;
+// Halfway between the entry dots and the keypad's top row.
+const STATUS_Y = 558;
 const PAD_Y = 700;
 const LINK_Y = 1390;
 const TEXT_TOP_Y = 380;
@@ -55,6 +56,9 @@ const WARN = hex(COLORS.warning);
 const BAD = hex(COLORS.error);
 const LINK = hex(COLORS.accentTeal);
 const QUIET = 0x4a4a6a;
+// Button labels at menu weight. No fill, so createButton picks dark ink on the
+// light teal and green faces and white on the dark gray one.
+const BUTTON_TEXT = { fontStyle: '800' };
 
 // Four rings that fill in as digits are typed. Returns { view, set(count, color) }.
 export function createPinDots(scene, { x = 0, y = 0, length = PIN_LENGTH } = {}) {
@@ -110,7 +114,10 @@ function addParagraph(scene, layer, y, text, kind = 'body') {
 }
 
 function addStatus(scene, layer) {
-  const t = scene.add.text(W / 2, STATUS_Y, '', menuStyle('caption', { align: 'center' })).setOrigin(0.5);
+  const t = scene.add.text(W / 2, STATUS_Y, '', menuStyle('caption', {
+    align: 'center',
+    wordWrap: { width: TEXT_W, useAdvancedWrap: true },
+  })).setOrigin(0.5);
   layer.add(t);
   return {
     set(text, color = SOFT) {
@@ -235,7 +242,7 @@ export function showCodeGate(scene, { code, storage, guardKey, now = () => Date.
   layer.add(createButton(scene, {
     x: W / 2, y: BACK_Y, label: '< Back to Game',
     width: 440, height: 100, color: QUIET,
-    textOverrides: menuStyle('button'),
+    textOverrides: BUTTON_TEXT,
     onClick: onBack,
   }));
   return layer;
@@ -299,7 +306,7 @@ export class ParentGate {
     layer.add(createButton(this.scene, {
       x: W / 2, y, label,
       width: 600, height: 110, color,
-      textOverrides: menuStyle('button'),
+      textOverrides: BUTTON_TEXT,
       onClick: this.guarded(onClick),
     }));
   }
@@ -308,7 +315,7 @@ export class ParentGate {
     layer.add(createButton(this.scene, {
       x: W / 2, y: BACK_Y, label: '< Back to Game',
       width: 440, height: 100, color: QUIET,
-      textOverrides: menuStyle('button'),
+      textOverrides: BUTTON_TEXT,
       onClick: this.guarded(this.onBack),
     }));
   }
@@ -483,7 +490,11 @@ export class ParentGate {
         addParagraph(scene, layer, y,
           `This PIN was made on ${formatDay(madeAt)}. Not you? A child may have made it. Ask them.`, 'caption');
       }
-      const problem = scene.add.text(W / 2, NOTE_Y, '', menuStyle('caption', { fill: BAD, align: 'center' })).setOrigin(0.5);
+      const problem = scene.add.text(W / 2, NOTE_Y, '', menuStyle('caption', {
+        fill: BAD,
+        align: 'center',
+        wordWrap: { width: TEXT_W, useAdvancedWrap: true },
+      })).setOrigin(0.5);
       layer.add(problem);
       this.button(layer, PRIMARY_Y, 'Start 1-day reset', () => {
         const started = startReset(storage, this.now());

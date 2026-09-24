@@ -55,6 +55,9 @@ export class StarterPickerScene extends Phaser.Scene {
       onClick: () => this.confirm()
     });
     this.confirmBtn.setDepth(20);
+    // The disabled label is dimmed to half by the helper; keep it readable
+    // since it tells the kid what to do.
+    this.confirmBtn.list.find(o => o.type === 'Text')?.setAlpha(0.8);
 
     new TransitionManager(this).fadeIn(280);
   }
@@ -90,19 +93,27 @@ export class StarterPickerScene extends Phaser.Scene {
 
     const textX = -200;
     const textWidth = 640;
-    card.add(this.add.text(textX, -175, sp.name, style('display', {
+    const name = this.add.text(textX, 0, sp.name, style('display', {
       fontSize: '52px',
       fill: '#' + sp.color.toString(16).padStart(6, '0')
-    })).setOrigin(0, 0));
+    })).setOrigin(0, 0);
 
-    card.add(this.add.text(textX, -105, sp.tagline, menuStyle('caption', {
+    const tagline = this.add.text(textX, 0, sp.tagline, menuStyle('caption', {
       wordWrap: { width: textWidth }
-    })).setOrigin(0, 0));
+    })).setOrigin(0, 0);
 
-    const lore = sp.stages.egg.lore;
-    card.add(this.add.text(textX, 0, lore, menuStyle('body', {
+    const lore = this.add.text(textX, 0, sp.stages.egg.lore, menuStyle('body', {
       wordWrap: { width: textWidth }
-    })).setOrigin(0, 0));
+    })).setOrigin(0, 0);
+
+    // Stack name, tagline and lore from their measured heights, centered in the
+    // card, so a tagline that wraps to two lines pushes the lore down instead
+    // of running into it.
+    const blockH = name.height + 6 + tagline.height + 18 + lore.height;
+    name.y = -blockH / 2;
+    tagline.y = name.y + name.height + 6;
+    lore.y = tagline.y + tagline.height + 18;
+    card.add([name, tagline, lore]);
 
     const hit = this.add.rectangle(0, 0, cw, ch, 0x000000, 0).setInteractive({ useHandCursor: true });
     card.add(hit);
@@ -145,7 +156,9 @@ export class StarterPickerScene extends Phaser.Scene {
       width: 480,
       height: 130,
       color: SPECIES[id].color,
-      textOverrides: menuStyle('button'),
+      // Dark ink on all three species colors. White on the Ember orange is
+      // under 3:1, and the helper only switches to dark ink on paler faces.
+      textOverrides: { fontStyle: '800', fill: '#0a0a1a' },
       onClick: () => this.confirm()
     });
     this.confirmBtn.setDepth(20);

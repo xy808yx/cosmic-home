@@ -85,7 +85,7 @@ import { getWorldBackground } from '../WorldBackgrounds.js';
 import { darken, lighten, hexStr } from '../colorUtils.js';
 import { TransitionManager } from '../TransitionManager.js';
 import { createButton, createIconButton } from '../buttonHelper.js';
-import { style } from '../textStyles.js';
+import { style, TYPE } from '../textStyles.js';
 import { COLORS } from '../colorPalette.js';
 import { companion, drawCompanion } from '../CompanionManager.js';
 import { cosmetics } from '../CosmeticManager.js';
@@ -167,6 +167,15 @@ const BARS_PAPER = {
   outline: { color: 0x2c2418, width: 4 }
 };
 
+// HUD lettering that sits straight on the backdrop (mode title, world name,
+// counter, stamp label, streak, chute sign). The dark chapters keep their bare
+// pale type, which reads fine on a night backdrop. Home Ground's skies run from
+// pale blue through orange to dusk purple, so no one fill reads on all of them:
+// its HUD type takes the bars' ink as a heavy outline instead, which holds on
+// every one of those skies. `ink` null means no outline beyond the preset's.
+const HUD_DARK = { label: '#cfcfe0', ink: null };
+const HUD_DAYLIGHT = { label: '#ffffff', ink: '#2c2418' };
+
 function shuffle(arr) {
   const a = arr.slice();
   for (let i = a.length - 1; i > 0; i--) {
@@ -200,7 +209,7 @@ function shuffle(arr) {
 export const CONVEYOR_CHAPTER = {
   1: {
     levelTrack: 'levelTheme',
-    skin: { liftTop: 0.0,  liftBottom: 0.0,  pool: { tint: 0x6f7ec4, alpha: 0.06 }, halo: false, floorDarken: 0.55, beltBody: 0.62, beltSlat: 0.40, bars: BARS_DARK }, // cold metal salvage
+    skin: { liftTop: 0.0,  liftBottom: 0.0,  pool: { tint: 0x6f7ec4, alpha: 0.06 }, halo: false, floorDarken: 0.55, beltBody: 0.62, beltSlat: 0.40, bars: BARS_DARK, hud: HUD_DARK }, // cold metal salvage
     copy: {
       title: 'SORT & SHIP', stamp: 'SALVAGED', chute: 'recheck', summaryWin: 'Cargo Sorted!',
       // Boss strings exactly as the pilot belt has always shown them. A Ch1/Ch2 boss
@@ -213,7 +222,7 @@ export const CONVEYOR_CHAPTER = {
   },
   2: {
     levelTrack: 'innerSpaceLevel',
-    skin: { liftTop: 0.0,  liftBottom: 0.04, pool: { tint: 0xff7a8a, alpha: 0.10 }, halo: false, floorDarken: 0.42, beltBody: 0.55, beltSlat: 0.34, bars: BARS_DARK }, // warm-red membrane
+    skin: { liftTop: 0.0,  liftBottom: 0.04, pool: { tint: 0xff7a8a, alpha: 0.10 }, halo: false, floorDarken: 0.42, beltBody: 0.55, beltSlat: 0.34, bars: BARS_DARK, hud: HUD_DARK }, // warm-red membrane
     copy: {
       title: 'SORT & SEND', stamp: 'ABSORBED', chute: 'reflux',  summaryWin: 'Nutrients Sent!',
       bossHeadline: 'RUSH ORDER', bossIncoming: 'BIG ORDER INCOMING', bossMiss: 'Order Unfinished',
@@ -223,7 +232,7 @@ export const CONVEYOR_CHAPTER = {
   },
   3: {
     levelTrack: 'homeGroundLevel',
-    skin: { liftTop: 0.10, liftBottom: 0.28, pool: { tint: null,     alpha: 0.16 }, halo: true,  floorDarken: 0.45, beltBody: 0.62, beltSlat: 0.40, bars: BARS_PAPER }, // daylight around town
+    skin: { liftTop: 0.10, liftBottom: 0.28, pool: { tint: null,     alpha: 0.16 }, halo: true,  floorDarken: 0.45, beltBody: 0.62, beltSlat: 0.40, bars: BARS_PAPER, hud: HUD_DAYLIGHT }, // daylight around town
     copy: {
       title: 'PACK & GO', stamp: 'PACKED', chute: 'recheck', summaryWin: 'All Packed!',
       bossHeadline: 'RUSH ORDER', bossIncoming: 'BIG RUSH INCOMING', bossMiss: 'Rush Unfinished',
@@ -260,8 +269,10 @@ const NIGHT_SHIFT = {
     pool: { tint: 0x8fd0ff, alpha: 0.05 },
     halo: true,             // one cool night light left on over the belt
     floorDarken: 0.72, beltBody: 0.72, beltSlat: 0.52,
-    // The lights are off: the paper label would glow. Back to the dark bars.
-    bars: BARS_DARK
+    // The lights are off: the paper label would glow. Back to the dark bars,
+    // and the dark HUD type with them.
+    bars: BARS_DARK,
+    hud: HUD_DARK
   },
   copy: {
     title: 'NIGHT SHIFT',
@@ -528,27 +539,37 @@ export class ConveyorScene extends Phaser.Scene {
       onClick: () => this.abandonRound('LevelSelectScene')
     }).setDepth(20);
 
-    this.add.text(W / 2, 70, this.isBoss ? this.copy.bossHeadline : this.copy.title, style('caption', {
-      fontSize: '26px', fill: this.isBoss ? '#ffb142' : '#cfcfe0', fontStyle: '900'
+    // The stack runs mode title, world name, counter, stamp label, and has to end
+    // clear of the bar plate (its top edge is BAR_TOP_Y minus the plate padding).
+    // The stamp label is the one line that says what the counter counts (in a
+    // rush it carries the quota), so it gets full label size and the counter sits
+    // a little higher to make room for it.
+    this.add.text(W / 2, 58, this.isBoss ? this.copy.bossHeadline : this.copy.title, style('caption', {
+      fill: this.isBoss ? '#ffb142' : this.skin.hud.label, fontStyle: '900',
+      ...this.hudInk(6)
     })).setOrigin(0.5).setDepth(20);
 
-    this.add.text(W / 2, 124, this.world.name, style('display', {
+    this.add.text(W / 2, 118, this.world.name, style('display', {
       fontSize: '52px',
-      fill: hexStr(this.accent)
+      fill: hexStr(this.accent),
+      ...this.hudInk(8)
     })).setOrigin(0.5).setDepth(20);
 
     // Hero counter: crates packed (== quota progress in a rush). The label under it
     // is the chapter's own stamp word, so a rush reads "OF 44 PACKED".
-    this.shippedText = this.add.text(W / 2, 250, '0', style('display', {
-      fontSize: '92px', fill: '#ffffff'
+    this.shippedText = this.add.text(W / 2, 230, '0', style('display', {
+      fontSize: '92px', fill: '#ffffff',
+      ...this.hudInk(10)
     })).setOrigin(0.5).setDepth(20);
-    this.add.text(W / 2, 322, this.isBoss ? `OF ${this.bossMaxQuota} ${this.copy.stamp}` : this.copy.stamp, style('caption', {
-      fontSize: '24px', fill: '#cfcfe0', fontStyle: '900'
+    this.add.text(W / 2, 314, this.isBoss ? `OF ${this.bossMaxQuota} ${this.copy.stamp}` : this.copy.stamp, style('caption', {
+      fill: this.skin.hud.label, fontStyle: '900',
+      ...this.hudInk(6)
     })).setOrigin(0.5).setDepth(20);
 
-    // Streak chip (top-right).
-    this.streakText = this.add.text(W - 70, 250, '', style('subhead', {
-      fontSize: '40px', fill: '#ff8b3d', fontStyle: '900'
+    // Streak chip (top-right), level with the counter.
+    this.streakText = this.add.text(W - 70, 230, '', style('subhead', {
+      fontSize: '42px', fill: '#ff8b3d', fontStyle: '900',
+      ...this.hudInk(6)
     })).setOrigin(1, 0.5).setDepth(20);
 
     // Status bars: the time bar, and under it the rush quota bar. Both are
@@ -556,6 +577,32 @@ export class ConveyorScene extends Phaser.Scene {
     // so a chapter changes their look by changing its tokens, not by growing a
     // second copy of this code.
     this.buildStatusBars();
+  }
+
+  // The skin's ink outline for type that sits straight on the backdrop, as
+  // style() overrides. Empty on the dark skins, so their HUD keeps the look it
+  // has always had (see HUD_DARK / HUD_DAYLIGHT).
+  hudInk(thickness) {
+    const ink = this.skin.hud?.ink;
+    return ink ? { stroke: ink, strokeThickness: thickness } : {};
+  }
+
+  // Narrow a wrapped sentence to the smallest wrap width that still gives the
+  // same number of lines, so centred copy splits into even lines instead of
+  // leaving one word stranded on the last. Line count and height are unchanged,
+  // so anything laid out from the text's measured height stays where it was.
+  balanceWrap(text, maxWidth) {
+    const lines = text.getWrappedText().length;
+    if (lines < 2) return;
+    let lo = 0;
+    let hi = maxWidth;
+    while (hi - lo > 8) {
+      const mid = Math.round((lo + hi) / 2);
+      text.setWordWrapWidth(mid);
+      if (text.getWrappedText().length > lines) lo = mid;
+      else hi = mid;
+    }
+    text.setWordWrapWidth(hi);
   }
 
   // Lay out the bar stack and paint everything static about it: the plate the
@@ -698,13 +745,19 @@ export class ConveyorScene extends Phaser.Scene {
     drawCorner(azX + azW - corner, azY + azH - corner, -1, -1);
     this.activeZoneGfx = az;
 
-    // Recheck chute hint at the right end (where unanswered crates tip off).
+    // Recheck chute hint at the right end (where unanswered crates tip off). The
+    // sign is a word the kid reads, so it sits at label size on the floor just
+    // under the belt's right end, right-aligned to the belt, rather than on the
+    // roller where there is no room for it. The dark skins have no HUD ink, but
+    // their floors can be light (the gold marrow floor), so the sign always
+    // carries a dark outline of its own.
     const chute = this.add.graphics().setDepth(2);
     chute.fillStyle(0x000000, 0.35);
     chute.fillRoundedRect(right - 70, BELT_Y - 30, 90, 120, 16);
-    this.add.text(right - 24, BELT_Y + 110, this.copy.chute, style('caption', {
-      fontSize: '18px', fill: '#9a8fb0'
-    })).setOrigin(0.5).setDepth(2);
+    this.chuteText = this.add.text(right, BELT_Y + BELT_H / 2 + 44, this.copy.chute, style('caption', {
+      fill: this.skin.hud.label, fontStyle: '800',
+      ...(this.skin.hud?.ink ? this.hudInk(6) : { stroke: '#0a0a1a', strokeThickness: 6 })
+    })).setOrigin(1, 0.5).setDepth(2);
   }
 
   buildPet() {
@@ -1262,7 +1315,7 @@ export class ConveyorScene extends Phaser.Scene {
     this.tweens.add({ targets: wash, fillAlpha: 0.96, duration: 900, ease: 'Quad.easeIn' });
 
     const line = this.add.text(W / 2, H / 2, 'The label wore off this one.\nWork out where it goes.', style('display', {
-      fontSize: '50px', fill: '#8fd0ff', align: 'center', fontStyle: '900',
+      fontSize: '52px', fill: '#8fd0ff', align: 'center', fontStyle: '900',
       lineSpacing: 14
     })).setOrigin(0.5).setDepth(82).setAlpha(0);
     this.tweens.add({ targets: line, alpha: 1, duration: 420, delay: 620 });
@@ -1396,8 +1449,9 @@ export class ConveyorScene extends Phaser.Scene {
     tag.lineStyle(3, 0xa8743a, 1);
     tag.strokeRoundedRect(s / 2 - 74, s / 2 - 78, 62, 62, 8);
     c.add(tag);
+    // The tag number is lettering painted on the prop (art), not a word to read.
     c.add(this.add.text(s / 2 - 43, s / 2 - 47, '83', style('display', {
-      fontSize: '36px', fill: '#8a3a1e', fontStyle: '900'
+      fontSize: '36px', fill: '#8a3a1e', fontStyle: '900', art: true
     })).setOrigin(0.5));
 
     // Steam — plain soft ellipses rising OUT of the open flaps (project art rule:
@@ -1503,17 +1557,21 @@ export class ConveyorScene extends Phaser.Scene {
     const plateInnerH = plateH - 18;
 
     // The stamp (copy.stamp: PACKED in Chapter 3), hidden until a correct route.
+    // The word is inked with a dark green outline so it reads over both the cream
+    // plate and the dark fact beneath it, and the frame is sized from the word so
+    // the longest chapter stamp ("ABSORBED"/"SALVAGED") always sits inside it.
     const stamp = this.add.container(0, 0);
     const stampG = this.add.graphics();
+    const stampText = this.add.text(0, 0, this.copy.stamp, style('subhead', {
+      fontSize: '42px', fill: '#58d68d', fontStyle: '900',
+      stroke: '#0f3d22', strokeThickness: 6
+    })).setOrigin(0.5);
+    const stampW = Math.max(260, Math.ceil(stampText.width) + 44);
+    const stampH = Math.max(68, Math.ceil(stampText.height) + 16);
     stampG.lineStyle(6, COLORS.success, 1);
-    // Wide enough for the longest chapter stamp word ("ABSORBED"/"SALVAGED" ≈230px
-    // at 40px/900) to sit inside the frame with margin; the six-letter "PACKED"
-    // and "PLACED" (about 156px) sit well inside it.
-    stampG.strokeRoundedRect(-130, -34, 260, 68, 10);
+    stampG.strokeRoundedRect(-stampW / 2, -stampH / 2, stampW, stampH, 10);
     stamp.add(stampG);
-    stamp.add(this.add.text(0, 0, this.copy.stamp, style('subhead', {
-      fontSize: '40px', fill: '#58d68d', fontStyle: '900'
-    })).setOrigin(0.5));
+    stamp.add(stampText);
     stamp.setAngle(-12);
     stamp.setScale(0);
     stamp.setAlpha(0);
@@ -1532,13 +1590,13 @@ export class ConveyorScene extends Phaser.Scene {
     //
     // which also reads the way the question is actually asked. The shrink loop
     // stays as a backstop so any future display string is clipped-proof, but it
-    // now has to do almost no work.
+    // now has to do almost no work, and it never goes below the label floor.
     c.reveal = (display) => {
       const text = display.includes(' = ') ? display.replace(' = ', '\n= ') : display;
       let size = 58;
       factText.setFontSize(size);
       factText.setText(text);
-      while ((factText.width > plateInnerW || factText.height > plateInnerH) && size > 26) {
+      while ((factText.width > plateInnerW || factText.height > plateInnerH) && size > TYPE.label) {
         size -= 2;
         factText.setFontSize(size);
       }
@@ -1553,7 +1611,7 @@ export class ConveyorScene extends Phaser.Scene {
       stamp.setAngle(-28);
       const flare = this.add.graphics();
       flare.fillStyle(0xffffff, 0.9);
-      flare.fillRoundedRect(-128, -42, 256, 84, 12);
+      flare.fillRoundedRect(-stampW / 2 + 2, -stampH / 2 - 8, stampW - 4, stampH + 16, 12);
       stamp.addAt(flare, 0);
       this.tweens.add({
         targets: stamp, scale: 1.18, angle: -12, duration: 200, ease: 'Back.easeOut',
@@ -1661,7 +1719,11 @@ export class ConveyorScene extends Phaser.Scene {
 
   buildKeypad() {
     const cont = this.add.container(0, 0).setDepth(5);
-    this.keypad = { cont, buttons: [], enabled: false, entryText: null };
+    // The readout has its own container so it stays at full strength when the
+    // keys dim between crates: the green "= 56 ✓" confirmation is shown at
+    // exactly that moment and has to read.
+    const readout = this.add.container(0, 0).setDepth(5);
+    this.keypad = { cont, readout, buttons: [], enabled: false, entryText: null };
 
     // Recalled-answer readout, between the belt and the pad.
     const plateW = 520;
@@ -1673,11 +1735,11 @@ export class ConveyorScene extends Phaser.Scene {
     plate.fillRoundedRect(W / 2 - plateW / 2, ENTRY_Y - plateH / 2, plateW, plateH, 18);
     plate.lineStyle(4, this.accent, 0.7);
     plate.strokeRoundedRect(W / 2 - plateW / 2, ENTRY_Y - plateH / 2, plateW, plateH, 18);
-    cont.add(plate);
+    readout.add(plate);
     this.keypad.entryText = this.add.text(W / 2, ENTRY_Y, '= –', style('display', {
       fontSize: '76px', fill: '#ffffff'
     })).setOrigin(0.5);
-    cont.add(this.keypad.entryText);
+    readout.add(this.keypad.entryText);
 
     const layout = [
       ['1', '2', '3'],
@@ -1734,6 +1796,10 @@ export class ConveyorScene extends Phaser.Scene {
       else b.hit.disableInteractive();
     });
     this.keypad.cont.setAlpha(enabled ? 1 : 0.45);
+    // The readout stays bright between crates (it is showing the verdict on the
+    // last one) and only steps back with the keys once the round is over, so it
+    // does not sit bright behind the win beat and the results.
+    this.keypad.readout.setAlpha(enabled || !this.ended ? 1 : 0.45);
   }
 
   pressDigit(d) {
@@ -1998,15 +2064,21 @@ export class ConveyorScene extends Phaser.Scene {
   }
 
   showSummary({ stars, accuracy, firstMastery, masteryBonus, dailyBonus, bossWin = false }) {
+    // The backdrop dims behind the panel so the HUD and the keys step back. It
+    // has to tween fillAlpha: the rectangle is made with a fill alpha of 0, so
+    // tweening its alpha alone never showed any dim at all. The chute sign
+    // pokes out past the panel's right edge as a word fragment, so it goes.
     const overlay = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0).setDepth(50).setInteractive();
-    this.tweens.add({ targets: overlay, alpha: 0.7, duration: 350 });
+    this.tweens.add({ targets: overlay, fillAlpha: 0.7, duration: 350 });
+    if (this.chuteText) this.tweens.add({ targets: this.chuteText, alpha: 0, duration: 350 });
 
     const panelW = 880;
     const panelH = 980;
     const panel = this.add.container(W / 2, H + panelH / 2).setDepth(60);
 
+    // Opaque, so the parked crate's fact never ghosts through behind the stars.
     const bg = this.add.graphics();
-    bg.fillStyle(COLORS.bgPanel, 0.98);
+    bg.fillStyle(COLORS.bgPanel, 1);
     bg.fillRoundedRect(-panelW / 2, -panelH / 2, panelW, panelH, 32);
     bg.lineStyle(3, this.accent, 0.9);
     bg.strokeRoundedRect(-panelW / 2, -panelH / 2, panelW, panelH, 32);
@@ -2020,8 +2092,8 @@ export class ConveyorScene extends Phaser.Scene {
     panel.add(this.add.text(0, -panelH / 2 + 80, title, style('display', {
       fontSize: '60px'
     })).setOrigin(0.5));
-    panel.add(this.add.text(0, -panelH / 2 + 145, `${this.world.name.toUpperCase()} · ${modeLabel}`, style('caption', {
-      fill: '#cfcfe0', fontSize: '24px'
+    panel.add(this.add.text(0, -panelH / 2 + 148, `${this.world.name.toUpperCase()} · ${modeLabel}`, style('caption', {
+      fill: '#cfcfe0', fontStyle: '700'
     })).setOrigin(0.5));
 
     // Stars.
@@ -2040,51 +2112,68 @@ export class ConveyorScene extends Phaser.Scene {
       });
     }
 
-    // Stats.
+    // Stats. Three columns 280 apart, so a label as long as BEST STREAK has its
+    // own lane at label size, with the label hung clear under its number.
     const statY = starY + 220;
+    const statGap = 280;
     const stat = (x, value, label, color) => {
       panel.add(this.add.text(x, statY, value, style('display', { fontSize: '74px', fill: color })).setOrigin(0.5));
-      panel.add(this.add.text(x, statY + 58, label, style('caption')).setOrigin(0.5));
+      panel.add(this.add.text(x, statY + 72, label, style('caption', { fontStyle: '700' })).setOrigin(0.5));
     };
-    stat(-220, this.isBoss ? `${this.bossQuota}/${this.bossMaxQuota}` : this.shipped.toString(), this.isBoss ? this.copy.bossStat : this.copy.stamp, '#ffffff');
+    stat(-statGap, this.isBoss ? `${this.bossQuota}/${this.bossMaxQuota}` : this.shipped.toString(), this.isBoss ? this.copy.bossStat : this.copy.stamp, '#ffffff');
     stat(0, `${accuracy}%`, 'ACCURACY', hexStr(this.accent));
-    stat(220, this.bestStreak.toString(), 'BEST STREAK', '#ff8b3d');
+    stat(statGap, this.bestStreak.toString(), 'BEST STREAK', '#ff8b3d');
 
-    // First-mastery banner.
+    // First-mastery banner: a pill sized from its words, riding the panel's top
+    // edge and lifted clear of the title under it.
     if (firstMastery) {
-      const banner = this.add.container(0, -panelH / 2 + 30);
+      const bannerText = this.add.text(0, 0, 'FIRST MASTERY! +5 STARDUST', style('subhead', {
+        fill: '#1a1208', fontStyle: '900'
+      })).setOrigin(0.5);
+      const pillW = Math.ceil(bannerText.width) + 80;
+      const pillH = Math.ceil(bannerText.height) + 26;
+      const banner = this.add.container(0, -panelH / 2 - 12);
       const bg2 = this.add.graphics();
       bg2.fillStyle(COLORS.warning, 1);
-      bg2.fillRoundedRect(-340, -34, 680, 68, 34);
+      bg2.fillRoundedRect(-pillW / 2, -pillH / 2, pillW, pillH, pillH / 2);
       banner.add(bg2);
-      banner.add(this.add.text(0, 0, 'FIRST MASTERY! +5 STARDUST', style('subhead', {
-        fontSize: '26px', fill: '#1a1208', fontStyle: '900'
-      })).setOrigin(0.5));
+      banner.add(bannerText);
       panel.add(banner);
       this.tweens.add({ targets: banner, scale: { from: 0.6, to: 1 }, duration: 320, ease: 'Back.easeOut' });
     }
 
-    // Stardust chip.
+    // Stardust chip: the sparkle and the words are laid out as one centred row
+    // and the chip is sized around them, so a longer total never runs into the
+    // sparkle.
     if (this.stardustEarned > 0) {
-      const chip = this.add.container(0, statY + 150);
+      const chip = this.add.container(0, statY + 160);
+      const chipText = this.add.text(0, 0, `+${this.stardustEarned} STARDUST`, style('subhead', {
+        fill: '#ffffff', fontStyle: '900', stroke: '#0a0a18', strokeThickness: 3
+      })).setOrigin(0, 0.5);
+      const iconSize = 22;                          // drawSparkleIcon: half-height
+      const iconHalfW = Math.ceil(iconSize * 0.45); // and its half-width
+      const iconGap = 18;
+      const rowW = iconHalfW * 2 + iconGap + Math.ceil(chipText.width);
+      const chipW = Math.max(400, rowW + 88);
+      const chipH = Math.max(80, Math.ceil(chipText.height) + 28);
       const cg = this.add.graphics();
       cg.fillStyle(COLORS.bgTrack, 1);
-      cg.fillRoundedRect(-200, -40, 400, 80, 40);
+      cg.fillRoundedRect(-chipW / 2, -chipH / 2, chipW, chipH, chipH / 2);
       cg.lineStyle(2, COLORS.accentPurple, 0.85);
-      cg.strokeRoundedRect(-200, -40, 400, 80, 40);
+      cg.strokeRoundedRect(-chipW / 2, -chipH / 2, chipW, chipH, chipH / 2);
       chip.add(cg);
       const icon = this.add.graphics();
-      drawSparkleIcon(icon, -120, 0, 22, COLORS.accentPurple);
+      drawSparkleIcon(icon, -rowW / 2 + iconHalfW, 0, iconSize, COLORS.accentPurple);
       chip.add(icon);
-      chip.add(this.add.text(20, 0, `+${this.stardustEarned} STARDUST`, style('subhead', {
-        fontSize: '34px', fill: '#ffffff', fontStyle: '900', stroke: '#0a0a18', strokeThickness: 3
-      })).setOrigin(0.5));
+      chipText.x = -rowW / 2 + iconHalfW * 2 + iconGap;
+      chip.add(chipText);
       panel.add(chip);
     }
 
-    // Summary pet.
+    // Summary pet, to the right of the stars and low enough that its ears stay
+    // clear of the subtitle line above.
     if (companion.hasStarter?.()) {
-      const pet = drawCompanion(this, 300, -250, { scale: 1.4 });
+      const pet = drawCompanion(this, 322, -196, { scale: 1.4 });
       pet.setScale(0);
       panel.add(pet);
       this.tweens.add({
@@ -2175,9 +2264,11 @@ export class ConveyorScene extends Phaser.Scene {
     const brief = this.world.bossBrief;
     this.tweens.add({ targets: overlay, fillAlpha: brief ? 0.95 : 0.84, duration: 260 });
 
-    // Lift the card when there's a brief so the whole block clears the keypad.
-    // Without one (Ch1/Ch2 conveyor pilot) the card sits exactly where it always has.
-    const card = this.add.container(W / 2, H / 2 - (brief ? 210 : 60));
+    // With a brief the card is centred on the screen from its measured height
+    // once everything is on it (see below), since the brief's length varies by
+    // place. Without one (Ch1/Ch2 conveyor pilot) the card sits exactly where it
+    // always has.
+    const card = this.add.container(W / 2, H / 2 - 60);
     card.setScale(0.6);
     card.setAlpha(0);
     root.add(card);
@@ -2196,14 +2287,14 @@ export class ConveyorScene extends Phaser.Scene {
 
     // The headline is the chapter's bossIncoming. A room whose single headline does
     // double duty (the Night Shift's AFTER HOURS) has none and shows bossHeadline
-    // instead, one step smaller.
+    // instead, at the same title size.
     const incoming = this.copy.bossIncoming || this.copy.bossHeadline;
     card.add(this.add.text(0, 10, incoming, style('display', {
-      fontSize: this.copy.bossIncoming ? '64px' : '56px',
+      fontSize: `${TYPE.title}px`,
       fill: this.isNightShift ? '#8fd0ff' : '#ffb142', fontStyle: '900'
     })).setOrigin(0.5));
-    card.add(this.add.text(0, 90, this.world.name, style('subhead', {
-      fontSize: '40px', fill: hexStr(this.accent)
+    card.add(this.add.text(0, 96, this.world.name, style('subhead', {
+      fontSize: `${TYPE.heading}px`, fontStyle: '800', fill: hexStr(this.accent)
     })).setOrigin(0.5));
     // Chapter 3 worlds carry a `bossBrief`: what this rush is FIXING. It's how the
     // authored `villain` finally surfaces in Home Ground: as an everyday mess at
@@ -2213,22 +2304,34 @@ export class ConveyorScene extends Phaser.Scene {
     // Flow top-down from under the world name. These are centre-origin by default,
     // which made a tall multi-line brief grow UPWARDS over the name, so anchor the
     // brief by its TOP edge and derive the next line from its measured height.
-    let briefY = 150;
+    let briefY = 158;
     if (brief) {
       const bt = this.add.text(0, briefY, brief, style('body', {
-        fontSize: '31px', fill: '#ffe6b0', align: 'center',
+        fill: '#ffe6b0', align: 'center',
         stroke: '#170f06', strokeThickness: 4,
-        lineSpacing: 12, wordWrap: { width: W - 220 }
+        lineSpacing: 10, wordWrap: { width: W - 160 }
       })).setOrigin(0.5, 0);
+      this.balanceWrap(bt, W - 160);
       card.add(bt);
-      briefY += bt.height + 34;
+      briefY += bt.height + 30;
     }
     // The deadline sentence. Chapter 3 reads each place's own rushLine off the world
     // ("Pack all 44 before dark."); the pilots and the Night Shift ignore the world.
     const quotaLine = this.copy.quotaLine(this.bossMaxQuota, this.world);
-    card.add(this.add.text(0, briefY, quotaLine, style('body', {
-      fontSize: '32px', fill: '#e8e8f0', align: 'center', wordWrap: { width: W - 220 }
-    })).setOrigin(0.5, 0));
+    const qt = this.add.text(0, briefY, quotaLine, style('body', {
+      fill: '#e8e8f0', align: 'center', wordWrap: { width: W - 160 }
+    })).setOrigin(0.5, 0);
+    this.balanceWrap(qt, W - 160);
+    card.add(qt);
+
+    // Centre the whole card (crate stack top to goal line bottom) on the screen,
+    // so a long brief grows the card both ways instead of running down into the
+    // keypad.
+    if (brief) {
+      const blockTop = -44 - 130 - cs / 2;
+      const blockBottom = briefY + qt.height;
+      card.y = Math.round(H / 2 - (blockTop + blockBottom) / 2);
+    }
 
     this.tweens.add({ targets: card, scale: 1, alpha: 1, duration: 320, ease: 'Back.easeOut' });
     audio.playRoundComplete?.();
@@ -2255,6 +2358,12 @@ export class ConveyorScene extends Phaser.Scene {
     root.add(overlay);
     this.tweens.add({ targets: overlay, fillAlpha: 0.6, duration: 220 });
 
+    // The victory line hangs where the top key row is and the pet stands over
+    // the chute sign, so the keys, the readout and the sign step out for the
+    // beat instead of showing through behind the words.
+    const behind = [this.keypad?.cont, this.keypad?.readout, this.chuteText].filter(Boolean);
+    if (behind.length) this.tweens.add({ targets: behind, alpha: 0, duration: 220 });
+
     const txt = this.add.text(W / 2, H / 2 - 40, this.copy.bossDone, style('display', {
       fontSize: '88px', fill: '#58d68d', align: 'center', fontStyle: '900', stroke: '#07120a', strokeThickness: 6
     })).setOrigin(0.5);
@@ -2265,13 +2374,17 @@ export class ConveyorScene extends Phaser.Scene {
     // The world's authored victory beat (flavorText). Chapter 3 has no combat
     // drama, so these warm lines ARE its emotional payoff; this is the moment they
     // land, once per rush cleared.
+    // Hung by its top edge below the headline and the celebrating pet (which
+    // stands to the right of the headline), so a two-line flavour grows down,
+    // away from both.
     const flavor = this.world.flavorText;
     if (flavor) {
-      const ft = this.add.text(W / 2, H / 2 + 170, flavor, style('body', {
-        fontSize: '30px', fill: '#d8f5c8', align: 'center',
-        stroke: '#07120a', strokeThickness: 4,
-        lineSpacing: 10, wordWrap: { width: W - 140 }
-      })).setOrigin(0.5);
+      const ft = this.add.text(W / 2, H / 2 + 190, flavor, style('body', {
+        fill: '#d8f5c8', align: 'center',
+        stroke: '#07120a', strokeThickness: 5,
+        lineSpacing: 10, wordWrap: { width: W - 180 }
+      })).setOrigin(0.5, 0);
+      this.balanceWrap(ft, W - 180);
       ft.alpha = 0;
       root.add(ft);
       this.tweens.add({ targets: ft, alpha: 1, duration: 700, delay: 520, ease: 'Quad.easeOut' });
@@ -2318,26 +2431,38 @@ export class ConveyorScene extends Phaser.Scene {
 
   // Slide-in "WORLD CLEARED" banner shown when the boss win masters the world.
   showWorldClearBanner(onComplete) {
+    // Two lines, the place's name over WORLD CLEARED!, with the banner sized
+    // from their measured heights so neither ever touches the edge.
     const bannerW = 960;
-    const bannerH = 160;
+    const padY = 26;
+    const lineGap = 8;
+    const nameText = this.add.text(0, 0, this.world.name.toUpperCase(), style('subhead', {
+      fill: '#cfcfe0', fontStyle: '800'
+    })).setOrigin(0.5, 0);
+    const clearedText = this.add.text(0, 0, 'WORLD CLEARED!', style('display', {
+      fontSize: `${TYPE.title}px`, fill: hexStr(this.accent)
+    })).setOrigin(0.5, 0);
+    const bannerH = Math.max(160, padY * 2 + Math.ceil(nameText.height) + lineGap + Math.ceil(clearedText.height));
+    nameText.y = -bannerH / 2 + padY;
+    clearedText.y = nameText.y + nameText.height + lineGap;
+    // It lands centred in the gap between the HUD's place name (bottom about
+    // y 152) and the bar plate (top y 359), so its edge never cuts the name.
+    const bannerY = 256;
     const banner = this.add.container(W / 2, -bannerH).setDepth(85);
+    // Opaque, so the HUD counter under it does not ghost through the words.
     const bg = this.add.graphics();
-    bg.fillStyle(COLORS.bgPanel, 0.98);
+    bg.fillStyle(COLORS.bgPanel, 1);
     bg.fillRoundedRect(-bannerW / 2, -bannerH / 2, bannerW, bannerH, 28);
     bg.lineStyle(4, this.accent, 0.9);
     bg.strokeRoundedRect(-bannerW / 2, -bannerH / 2, bannerW, bannerH, 28);
     banner.add(bg);
-    banner.add(this.add.text(0, -28, this.world.name.toUpperCase(), style('subhead', {
-      fontSize: '30px', fill: '#cfcfe0'
-    })).setOrigin(0.5));
-    banner.add(this.add.text(0, 28, 'WORLD CLEARED!', style('display', {
-      fontSize: '52px', fill: hexStr(this.accent)
-    })).setOrigin(0.5));
+    banner.add(nameText);
+    banner.add(clearedText);
 
     let done = false;
     const finish = () => { if (done) return; done = true; if (typeof onComplete === 'function') onComplete(); };
     this.tweens.add({
-      targets: banner, y: 240, duration: 420, ease: 'Back.easeOut',
+      targets: banner, y: bannerY, duration: 420, ease: 'Back.easeOut',
       onComplete: () => {
         this.time.delayedCall(1600, () => {
           this.tweens.add({

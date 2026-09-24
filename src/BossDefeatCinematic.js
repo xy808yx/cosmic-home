@@ -215,10 +215,27 @@ export function playBossDefeatCinematic(scene, asteroid, onComplete) {
     if (cardShown) return;
     cardShown = true;
 
+    // A world line too long for one row breaks after "WORLD N:" so the
+    // name stays whole on its own line, and the card grows to fit it.
     const cardW = 920;
-    const cardH = 320;
+    const heading = scene.add.text(0, 0, `WORLD ${worldId}: ${worldName.toUpperCase()}`, style('display', {
+      fontSize: '52px', fill: '#ffffff', fontStyle: '900', align: 'center'
+    })).setOrigin(0.5, 0);
+    if (heading.width > cardW - 80) {
+      heading.setText(`WORLD ${worldId}:\n${worldName.toUpperCase()}`);
+      heading.setWordWrapWidth(cardW - 80);
+    }
+    const cleared = scene.add.text(0, 0, 'CLEARED!', style('display', {
+      fontSize: '76px', fill: '#' + accent.toString(16).padStart(6, '0'),
+      fontStyle: '900', stroke: '#0a0a18', strokeThickness: 5,
+    })).setOrigin(0.5, 0);
+    const lineGap = 14;
+    const contentH = heading.height + lineGap + cleared.height;
+    const cardH = Math.max(320, Math.ceil(contentH) + 120);
+    heading.y = -contentH / 2;
+    cleared.y = heading.y + heading.height + lineGap;
     const overlay = scene.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0).setDepth(70).setInteractive();
-    scene.tweens.add({ targets: overlay, alpha: 0.65, duration: 200 });
+    scene.tweens.add({ targets: overlay, fillAlpha: 0.65, duration: 200 });
 
     const card = scene.add.container(W / 2, H / 2).setDepth(71);
     card.setScale(0.96);
@@ -229,13 +246,8 @@ export function playBossDefeatCinematic(scene, asteroid, onComplete) {
     bg.lineStyle(4, accent, 0.9);
     bg.strokeRoundedRect(-cardW / 2, -cardH / 2, cardW, cardH, 36);
     card.add(bg);
-    card.add(scene.add.text(0, -50, `WORLD ${worldId}: ${worldName.toUpperCase()}`, style('display', {
-      fontSize: '44px', fill: '#ffffff', fontStyle: '900',
-    })).setOrigin(0.5));
-    card.add(scene.add.text(0, 40, 'CLEARED!', style('display', {
-      fontSize: '76px', fill: '#' + accent.toString(16).padStart(6, '0'),
-      fontStyle: '900', stroke: '#0a0a18', strokeThickness: 5,
-    })).setOrigin(0.5));
+    card.add(heading);
+    card.add(cleared);
 
     scene.tweens.add({
       targets: card, alpha: 1, scale: 1, duration: 240, ease: 'Quad.easeOut',

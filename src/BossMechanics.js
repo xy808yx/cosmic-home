@@ -376,7 +376,7 @@ function popSoap(scene, x, y) {
     });
   }
   const txt = scene.add.text(x, y - 10, 'SCRUB!', style('display', {
-    fontSize: '34px', fill: '#bfe9ff', stroke: '#0a2a3a', strokeThickness: 5
+    fontSize: '42px', fill: '#bfe9ff', stroke: '#0a2a3a', strokeThickness: 5
   })).setOrigin(0.5).setDepth(42);
   scene.tweens.add({
     targets: txt, y: y - 70, alpha: 0, scale: 1.3,

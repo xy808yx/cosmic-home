@@ -92,44 +92,67 @@ export function playEvolutionCinematic(scene, newStage, onDone) {
   newPet.alpha = 0;
   root.add(newPet);
 
-  // Title card — stage name + lore (revealed at the end)
-  const cardContainer = scene.add.container(W / 2, H - 380);
+  // Title card: stage name + lore (revealed at the end). The lines are
+  // measured and stacked, and the card grows upward from a fixed bottom edge
+  // to fit them, so a long lore paragraph never runs into the name or the
+  // tap hint.
+  const cardW = 920;
+  const cardBottom = H - 160;
+  const padY = 36;
+  const gap = 18;
+  const innerW = cardW - 80;
+
+  const evolvedTag = scene.add.text(0, 0, 'EVOLVED', style('caption', {
+    fontSize: '36px', fill: '#cfcfe0', fontStyle: '900',
+    letterSpacing: 8
+  })).setOrigin(0.5, 0);
+
+  const nameText = scene.add.text(0, 0, newName.toUpperCase(), style('display', {
+    fontSize: '78px',
+    fill: '#' + species.accent.toString(16).padStart(6, '0'),
+    fontStyle: '900',
+    stroke: '#0a0010', strokeThickness: 4
+  })).setOrigin(0.5, 0);
+  if (nameText.width > innerW) nameText.setScale(innerW / nameText.width);
+
+  const loreObj = loreText
+    ? scene.add.text(0, 0, loreText, style('body', {
+      fontSize: '42px', fill: '#e0e0ef', align: 'center',
+      wordWrap: { width: innerW }
+    })).setOrigin(0.5, 0)
+    : null;
+
+  // An instruction, so it sits on the body size like the other tap hints.
+  const tapText = scene.add.text(0, 0, 'TAP TO CONTINUE', style('caption', {
+    fontSize: '42px', fill: '#cfcfe0', fontStyle: '900',
+    letterSpacing: 4
+  })).setOrigin(0.5, 0);
+
+  const stack = [evolvedTag, nameText, loreObj, tapText].filter(Boolean);
+  const contentH = stack.reduce((sum, t) => sum + t.height * t.scaleY, 0) + gap * (stack.length - 1);
+  // A little extra air above the tap hint so it reads as its own line.
+  const tapGapExtra = 12;
+  const cardH = Math.ceil(contentH + tapGapExtra + padY * 2);
+
+  const cardContainer = scene.add.container(W / 2, cardBottom - cardH / 2);
   cardContainer.setScrollFactor(0).setDepth(2004);
   cardContainer.alpha = 0;
   root.add(cardContainer);
 
   const cardBg = scene.add.graphics();
   cardBg.fillStyle(0x12122a, 0.95);
-  cardBg.fillRoundedRect(-460, -150, 920, 300, 28);
+  cardBg.fillRoundedRect(-cardW / 2, -cardH / 2, cardW, cardH, 28);
   cardBg.lineStyle(3, species.accent, 0.95);
-  cardBg.strokeRoundedRect(-460, -150, 920, 300, 28);
+  cardBg.strokeRoundedRect(-cardW / 2, -cardH / 2, cardW, cardH, 28);
   cardContainer.add(cardBg);
 
-  const evolvedTag = scene.add.text(0, -110, 'EVOLVED', style('caption', {
-    fontSize: '28px', fill: '#cfcfe0', fontStyle: '900',
-    letterSpacing: 8
-  })).setOrigin(0.5);
-  cardContainer.add(evolvedTag);
-
-  const nameText = scene.add.text(0, -50, newName.toUpperCase(), style('display', {
-    fontSize: '78px',
-    fill: '#' + species.accent.toString(16).padStart(6, '0'),
-    fontStyle: '900',
-    stroke: '#0a0010', strokeThickness: 4
-  })).setOrigin(0.5);
-  cardContainer.add(nameText);
-
-  if (loreText) {
-    cardContainer.add(scene.add.text(0, 35, loreText, style('body', {
-      fontSize: '26px', fill: '#cfcfe0', align: 'center',
-      wordWrap: { width: 860 }
-    })).setOrigin(0.5));
-  }
-
-  cardContainer.add(scene.add.text(0, 110, 'TAP TO CONTINUE', style('caption', {
-    fontSize: '20px', fill: '#7a7a90', fontStyle: '900',
-    letterSpacing: 4
-  })).setOrigin(0.5));
+  let y = -cardH / 2 + padY;
+  stack.forEach(t => {
+    if (t === tapText) y += tapGapExtra;
+    t.y = y;
+    y += t.height * t.scaleY + gap;
+    cardContainer.add(t);
+  });
 
   let dismissed = false;
   let titleShown = false;

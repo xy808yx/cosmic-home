@@ -170,8 +170,11 @@ export function playWormholeCinematic(scene, direction, onDone, opts = {}) {
   // --- TAP-TO-SKIP (invisible full-screen surface + a gentle late-fading hint) ---
   const hit = scene.add.rectangle(CX, 960, W, H, 0x000000, 0.001).setInteractive();
   root.add(hit);
-  const skipHint = scene.add.text(CX, H - 150, 'tap to skip', style('caption', {
-    fontSize: '30px', fill: '#9a9aae'
+  // Body size, light ink and a dark outline so it reads over the bright
+  // passing rings and the pale homecoming sky.
+  const skipHint = scene.add.text(CX, H - 150, 'tap to skip', style('body', {
+    fontSize: '42px', fill: '#e0e0ef', fontStyle: '700',
+    stroke: '#0a0a1a', strokeThickness: 5
   })).setOrigin(0.5).setAlpha(0);
   root.add(skipHint);
   timers.push(scene.time.delayedCall(1000, () => {

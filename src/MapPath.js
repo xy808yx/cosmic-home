@@ -14,9 +14,13 @@ import Phaser from 'phaser';
 export const MAP_HEADER_H = 220;
 export const MAP_HEADER_FADE_END = 260;
 
+// The lowest node on every chapter sits at y 1480. WorldMapScene centres the
+// Tune-Up pill between that node's label and the bottom world panel, and the
+// 36px labels leave no room for a lower node.
+
 const POSITIONS_CH1 = [
   // 11 hand-tuned points to feel like a meandering S-curve.
-  { x: 240,  y: 1500 },  // 1 — bottom-left
+  { x: 240,  y: 1480 },  // 1: bottom-left (was 1500; lifted to match the other chapters)
   { x: 540,  y: 1430 },  // 2
   { x: 820,  y: 1340 },  // 3
   { x: 880,  y: 1180 },  // 4
@@ -46,8 +50,9 @@ const POSITIONS_CH3 = [
   // where the real place does, which is what the kids recognise: the beach out
   // on the point's coast, the big store downtown, the seawall at the inlet's
   // east end across from the dome, the mountain over on the right. Rules this
-  // layout keeps: every x stays between 240 and 860 so the 28px labels never
-  // clip; the lowest node stays at y 1480 because the Tune-Up pill band in
+  // layout keeps: every x stays between 240 and 860 so the labels stay near
+  // their nodes (WorldMapScene also clamps them inside a 24px edge gutter);
+  // the lowest node stays at y 1480 because the Tune-Up pill band in
   // WorldMapScene is derived from it; every neighbouring pair is at least as
   // far apart as the Chapter 2 curve kept them; and the drawn route never
   // crosses itself (154px of clearance between non-adjacent legs).
@@ -156,11 +161,8 @@ export const HIDDEN_NODE_POSITIONS = {
                            // label naturally centred under its node.
   19: { x: 415, y: 1071 }  // Hot Pot Time: branches down-left of its host The
                            // Bread Place, into the open pocket the beach left
-                           // behind when it moved out to the coast   // Hot Pot Time: branches up-left of its host The Bread
-                           // Place (540, 830), into the open left pocket above
-                           // The Big Store (260, 1000). Its label (y 804) clears
-                           // the big-store node top (about y 910) and never meets
-                           // the bread place label (y 920, x 410 to 670).
+                           // behind when it moved out to the coast. Its label
+                           // sits well below The Bread Place's.
 };
 
 // Host world id each hidden world is connected to. Used to draw the dashed

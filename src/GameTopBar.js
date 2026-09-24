@@ -35,16 +35,22 @@ export function createTopBar(scene, topBarH) {
   })).setOrigin(0.5).setDepth(15);
 
   const modeRow = scene.add.container(titleX, 100).setDepth(15);
-  if (scene.isBoss) {
-    const skullG = scene.add.graphics();
-    drawSkullIcon(skullG, -120, 0, 16);
-    modeRow.add(skullG);
-  }
-  modeRow.add(scene.add.text(0, 0, scene.modeConfig.label.toUpperCase(), style('caption', {
-    fontSize: '26px',
+  const modeText = scene.add.text(0, 0, scene.modeConfig.label.toUpperCase(), style('caption', {
+    fontSize: '36px',
     fill: '#cfcfe0',
     fontStyle: '900'
-  })).setOrigin(0.5));
+  })).setOrigin(0.5);
+  if (scene.isBoss) {
+    // The skull sits just left of the villain name, placed from its width so
+    // a long name never runs over it. The pair stays centered as a group.
+    const skullW = 26;
+    const skullGap = 14;
+    modeText.x = (skullW + skullGap) / 2;
+    const skullG = scene.add.graphics();
+    drawSkullIcon(skullG, modeText.x - modeText.width / 2 - skullGap - skullW / 2, 0, 16);
+    modeRow.add(skullG);
+  }
+  modeRow.add(modeText);
 
   // Pause (top-right) — opens a modal with Resume / Sound / Music / Quit.
   createIconButton(scene, {
@@ -54,8 +60,11 @@ export function createTopBar(scene, topBarH) {
     onClick: () => scene.openPauseMenu?.()
   }).setDepth(15);
 
-  // Row 1: STREAK / SCORE / TIME with pixel icons
-  const row1Y = 170;
+  // Row 1: STREAK / SCORE / TIME with pixel icons. The labels sit on their
+  // own line under the digits (labelY), with the hearts a row lower, so the
+  // 36px labels clear both.
+  const row1Y = 158;
+  const labelY = row1Y + 62;
   scene.streakIcon = scene.add.graphics().setDepth(10);
   drawFlameIcon(scene.streakIcon, 0, 0, 18);
   scene.streakIcon.x = W * 0.18 - 60;
@@ -64,9 +73,8 @@ export function createTopBar(scene, topBarH) {
     x: W * 0.18, y: row1Y, depth: 10,
     textStyle: { fontSize: '52px', fill: '#ff8b3d' },
   });
-  scene.add.text(W * 0.18 - 60, row1Y + 42, 'STREAK', style('caption', {
-    fontSize: '22px',
-    fill: '#7a7a90',
+  scene.add.text(W * 0.18 - 60, labelY, 'STREAK', style('caption', {
+    fontSize: '36px',
     fontStyle: '900'
   })).setOrigin(0, 0.5).setDepth(10);
 
@@ -80,9 +88,8 @@ export function createTopBar(scene, topBarH) {
     fontSize: '52px',
     fill: '#ffffff'
   })).setOrigin(0, 0.5).setDepth(10);
-  const scoreLabel = scene.add.text(W * 0.50 - 60, row1Y + 42, 'SCORE', style('caption', {
-    fontSize: '22px',
-    fill: '#7a7a90',
+  const scoreLabel = scene.add.text(W * 0.50 - 60, labelY, 'SCORE', style('caption', {
+    fontSize: '36px',
     fontStyle: '900'
   })).setOrigin(0, 0.5).setDepth(10);
   scene.scoreGroup = [scene.scoreIcon, scene.scoreText, scoreLabel];
@@ -96,14 +103,13 @@ export function createTopBar(scene, topBarH) {
     fontSize: '52px',
     fill: '#' + scene.world.accentColor.toString(16).padStart(6, '0')
   })).setOrigin(0, 0.5).setDepth(10);
-  scene.add.text(W * 0.78 - 60, row1Y + 42, 'TIME', style('caption', {
-    fontSize: '22px',
-    fill: '#7a7a90',
+  scene.add.text(W * 0.78 - 60, labelY, 'TIME', style('caption', {
+    fontSize: '36px',
     fontStyle: '900'
   })).setOrigin(0, 0.5).setDepth(10);
 
-  // Row 2: HP hearts (5)
-  const row2Y = 260;
+  // Row 2: HP hearts (5), below the stat labels and above the time bar.
+  const row2Y = 274;
   const hpStartX = W / 2 - 4 * 60;
   scene.hpIcons = [];
   for (let i = 0; i < SHIP_HP_MAX; i++) {

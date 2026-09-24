@@ -27,11 +27,13 @@ export function createModal(scene, opts = {}) {
   const W = scene.cameras.main.width;
   const H = scene.cameras.main.height;
 
-  const overlay = scene.add.rectangle(
-    W / 2, H / 2, W, H, 0x000000, overlayFadeMs > 0 ? 0 : overlayAlpha
-  ).setDepth(depth).setInteractive();
+  // The fill carries the dim; a fade-in tweens the object's own alpha from 0
+  // to 1 on top of it (fading alpha on a zero-alpha fill never showed).
+  const overlay = scene.add.rectangle(W / 2, H / 2, W, H, 0x000000, overlayAlpha)
+    .setDepth(depth).setInteractive();
   if (overlayFadeMs > 0) {
-    scene.tweens.add({ targets: overlay, alpha: overlayAlpha, duration: overlayFadeMs });
+    overlay.setAlpha(0);
+    scene.tweens.add({ targets: overlay, alpha: 1, duration: overlayFadeMs });
   }
   const card = scene.add.container(W / 2, H / 2).setDepth(depth + 1);
 
@@ -54,9 +56,10 @@ export function createModal(scene, opts = {}) {
 
   let closeHint = null;
   if (showCloseHint) {
-    closeHint = scene.add.text(W / 2, H / 2 + height / 2 + 50, closeHintText, style('caption', {
-      fontSize: '26px',
-      fill: '#9a9aae'
+    // Body size and bright ink: this is the only instruction for getting out
+    // of the popup, and it used to be the smallest, dimmest text on screen.
+    closeHint = scene.add.text(W / 2, H / 2 + height / 2 + 60, closeHintText, style('body', {
+      fill: '#e0e0ef'
     })).setOrigin(0.5).setDepth(depth + 1);
   }
 
