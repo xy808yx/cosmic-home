@@ -16,7 +16,7 @@ const transfer = await import('../src/saveTransfer.js');
 const {
   TRANSFER_KEYS, NOT_TRANSFERRED, TRANSFER_BACKUP_KEY, TRANSFER_MESSAGES, BLOCK_BEGIN, BLOCK_END,
   MAX_TRANSFER_CHARS, buildTransferCode, parseTransferCode, describeSave, applyTransfer, readBackup,
-  undoLastImport, sameSaves, transferFileName, fnv1a32, hasMoreProgress,
+  undoLastImport, sameSaves, transferFileName, fnv1a32, hasMoreProgress, carriesPin,
 } = transfer;
 const { progress } = gameData;
 
@@ -95,15 +95,34 @@ test('round trip is byte-exact for every transferred key, including odd characte
   for (const key of TRANSFER_KEYS) assert.equal(target.getItem(key), entries[key], key);
 });
 
-test('absent keys stay absent after a round trip', () => {
+test('absent keys stay absent after a round trip, except this device keeps its PIN', () => {
   const source = makeStorage({ cosmicMathProgress: PROGRESS_OK });
   const parsed = parseTransferCode(buildTransferCode(source, { now: NOW, catalog }).text);
   assert.deepEqual(Object.keys(parsed.keys), ['cosmicMathProgress']);
+  assert.equal(carriesPin(parsed.keys), false);
   const target = makeStorage({ cosmicMathParentPin: '9999', cosmicMathMusicEnabled: '0' });
   applyTransfer(target, parsed.keys, { now: NOW });
-  assert.equal(target.getItem('cosmicMathParentPin'), null);
+  assert.equal(target.getItem('cosmicMathParentPin'), '9999');
   assert.equal(target.getItem('cosmicMathMusicEnabled'), null);
   assert.equal(target.getItem('cosmicMathProgress'), PROGRESS_OK);
+});
+
+test('a file with a PIN brings it along, and Undo without one keeps the PIN', () => {
+  const target = makeStorage({ cosmicMathProgress: '{"factMastery":{}}', cosmicMathParentPin: '1111' });
+  assert.equal(carriesPin({ cosmicMathParentPin: '2222' }), true);
+  applyTransfer(target, { cosmicMathProgress: PROGRESS_OK, cosmicMathParentPin: '2222' }, { now: NOW });
+  assert.equal(target.getItem('cosmicMathParentPin'), '2222');
+  assert.equal(undoLastImport(target).ok, true);
+  assert.equal(target.getItem('cosmicMathParentPin'), '1111');
+
+  // An Undo copy from a device that had no PIN of its own (the old silent
+  // starting PIN) must not leave the device with no PIN at all.
+  const legacy = makeStorage({ cosmicMathProgress: '{"factMastery":{}}' });
+  applyTransfer(legacy, { cosmicMathProgress: PROGRESS_OK, cosmicMathParentPin: '2222' }, { now: NOW });
+  assert.equal(carriesPin(readBackup(legacy).keys), false);
+  assert.equal(undoLastImport(legacy).ok, true);
+  assert.equal(legacy.getItem('cosmicMathParentPin'), '2222');
+  assert.equal(legacy.getItem('cosmicMathProgress'), '{"factMastery":{}}');
 });
 
 test('a real save moved to a fresh store loads back identically', () => {
@@ -125,7 +144,7 @@ test('a real save moved to a fresh store loads back identically', () => {
   assert.equal(summary.petName, 'Tidalord');
   assert.equal(summary.factsPracticed, 78);
 
-  // "New iPad": empty store, then import, then the game's own loader.
+  // "New device": empty store, then import, then the game's own loader.
   saved.clear();
   progress.reset();
   const parsed = parseTransferCode(text);
@@ -311,8 +330,11 @@ test('export only reads', () => {
 test('sameSaves spots a save that is already here', () => {
   const store = makeStorage({ cosmicMathProgress: PROGRESS_OK, cosmicMathParentPin: '1234' });
   assert.equal(sameSaves({ cosmicMathProgress: PROGRESS_OK, cosmicMathParentPin: '1234' }, store), true);
-  assert.equal(sameSaves({ cosmicMathProgress: PROGRESS_OK }, store), false);
+  // A file without a PIN keeps this one, so it changes nothing here.
+  assert.equal(sameSaves({ cosmicMathProgress: PROGRESS_OK }, store), true);
+  assert.equal(sameSaves({ cosmicMathProgress: PROGRESS_OK, cosmicMathParentPin: '4321' }, store), false);
   assert.equal(sameSaves({ cosmicMathProgress: PROGRESS_OK, cosmicMathParentPin: '1234', cosmicMathSfxEnabled: '0' }, store), false);
+  assert.equal(sameSaves({ cosmicMathProgress: PROGRESS_OK, cosmicMathParentPin: '1234' }, makeStorage({ cosmicMathProgress: PROGRESS_OK })), false);
 });
 
 test('the preview reads the save the way the game does', () => {
@@ -389,6 +411,7 @@ test('file name and header show the pet and date but never the PIN', () => {
   assert.ok(!text.includes('4321'));
   for (const key of TRANSFER_KEYS) assert.ok(!text.includes(key), key);
   assert.ok(!text.includes('\u2014'));
+  assert.ok(!/starting parent PIN|8888/.test(header));
   assert.equal(transferFileName({ petName: null }, NOW), `Cosmic Home save - ${day}.txt`);
   assert.equal(transferFileName({ petName: 'A/B:C?' }, NOW), `Cosmic Home save - ABC - ${day}.txt`);
 });
@@ -416,7 +439,7 @@ test('every storage key the game uses is either moved or knowingly left behind',
 });
 
 test('no em dashes in the transfer code or its copy', async () => {
-  for (const name of ['saveTransfer.js', 'transferSheet.js']) {
+  for (const name of ['saveTransfer.js', 'transferSheet.js', 'parentPin.js', 'parentGate.js']) {
     const source = await readFile(new URL(`../src/${name}`, import.meta.url), 'utf8');
     assert.ok(!source.includes('\u2014'), name);
   }
@@ -451,7 +474,7 @@ test('newer play that adds no stars or facts still counts as more progress', () 
   assert.equal(legacy.levelsMastered, 1);
 });
 
-test('a failed import on a nearly full iPad leaves every key and the old Undo copy as they were', () => {
+test('a failed import on a nearly full device leaves every key and the old Undo copy as they were', () => {
   const oldBackup = JSON.stringify({ app: 'cosmic-home', kind: 'transfer-backup', format: 1, savedAt: 'x', keys: {} });
   const entries = {
     cosmicMathProgress: JSON.stringify({ factMastery: {}, pad: 'p'.repeat(1000) }),

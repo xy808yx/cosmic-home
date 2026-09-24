@@ -1,4 +1,4 @@
-// Save transfer: moves one child's progress from one iPad to another as a
+// Save transfer: moves one child's progress from one device to another as a
 // small text file (or a pasted code). Pure logic only: no Phaser, no DOM, no
 // imports, so tests can drive it with a Map-backed storage. The screen that
 // uses it lives in transferSheet.js.
@@ -16,10 +16,21 @@ export const TRANSFER_KEYS = Object.freeze([
   'conveyorInputMode',
 ]);
 
-// Keys the game knows about but deliberately leaves behind.
-export const NOT_TRANSFERRED = Object.freeze(['cosmicMathAchievements']);
+// Keys the game knows about but deliberately leaves behind. The PIN's made-on
+// date, a waiting one-day reset and the wrong-try pause belong to this device
+// (see parentPin.js).
+export const NOT_TRANSFERRED = Object.freeze([
+  'cosmicMathAchievements',
+  'cosmicMathParentPinInfo',
+  'cosmicMathPinReset',
+  'cosmicMathPinGuard',
+  'cosmicMathDevMenuGuard',
+]);
 
-// One copy of whatever this iPad had before the last import, for Undo.
+// A file without a PIN leaves this device's PIN alone (see writeKeys).
+const PIN_KEY = 'cosmicMathParentPin';
+
+// One copy of whatever this device had before the last import, for Undo.
 export const TRANSFER_BACKUP_KEY = 'cosmicMathTransferBackup';
 
 export const TRANSFER_FORMAT = 1;
@@ -37,10 +48,10 @@ export const TRANSFER_MESSAGES = Object.freeze({
   empty: 'Nothing to read yet. Choose the save file, or paste the save code.',
   tooBig: 'That file is too big to be a Cosmic Home save. Check that you picked the right file.',
   notASave: 'That is not a Cosmic Home save. Look for the file named "Cosmic Home save".',
-  damaged: 'This save is damaged or cut off. Send it again from the old iPad.',
+  damaged: 'This save is damaged or cut off. Send it again from the old device.',
   tooNew: 'This save came from a newer version of Cosmic Home. Close the game completely, open it again, then try again.',
-  noProgress: 'This save has no game progress in it. Send it again from the old iPad.',
-  storageFailed: 'This iPad could not store the progress, so nothing was changed.',
+  noProgress: 'This save has no game progress in it. Send it again from the old device.',
+  storageFailed: 'This device could not store the progress, so nothing was changed.',
   noBackup: 'There is no import to undo.',
 });
 
@@ -198,7 +209,7 @@ export function describeSave(progressRaw, catalog) {
     }
   }
 
-  // The pet is ignored on purpose: a fresh iPad has to pick a pet before the
+  // The pet is ignored on purpose: a fresh device has to pick a pet before the
   // parent dashboard can be reached, and that alone is not progress.
   summary.isEmpty = summary.stars === 0 && summary.factsPracticed === 0 && !anyWorldStars;
   return summary;
@@ -231,12 +242,12 @@ function transferHeader(summary, now) {
   if (summary.petName) lines.push(`Pet: ${summary.petName}`);
   lines.push(`Stars: ${summary.stars}`);
   lines.push(`Saved: ${localDate(now)}`);
-  lines.push('This file moves a child\'s progress to another iPad.');
-  lines.push('On the new iPad, open Cosmic Home. If it asks you to pick a pet,');
+  lines.push('This file moves a child\'s progress to another device.');
+  lines.push('On the new device, open Cosmic Home. If it asks you to pick a pet,');
   lines.push('pick any one: the old pet comes back after the move.');
-  lines.push('Then tap the gear and go to Parent Dashboard, Settings,');
-  lines.push('Move to a New iPad, Receive progress. The new iPad uses the');
-  lines.push('starting parent PIN until the move is done.');
+  lines.push('Then tap the gear. If it asks you to make a grown-up PIN, make one.');
+  lines.push('Then go to Settings, Move to a New Device, Receive progress.');
+  lines.push('After the move, the grown-up PIN is the one from the old device.');
   return lines.join('\n');
 }
 
@@ -361,9 +372,16 @@ export function parseTransferCode(text) {
   };
 }
 
-// True when this storage already holds exactly these values (absent == absent).
+// True when the file brings its own grown-up PIN along.
+export function carriesPin(keys) {
+  return isPlainObject(keys) && hasOwn(keys, PIN_KEY);
+}
+
+// True when importing these values would change nothing here (absent ==
+// absent, except that a file without a PIN keeps this device's PIN).
 export function sameSaves(keys, storage) {
   return TRANSFER_KEYS.every(key => {
+    if (key === PIN_KEY && !carriesPin(keys)) return true;
     const incoming = hasOwn(keys, key) ? keys[key] : null;
     return incoming === storage.getItem(key);
   });
@@ -385,11 +403,13 @@ function restoreSnapshot(storage, snap) {
 }
 
 // Replace rule: every transfer key the file has is set, every one it lacks is
-// removed, nothing else is touched.
+// removed, nothing else is touched. The one exception is the grown-up PIN: a
+// file (or Undo copy) without one leaves this device's PIN alone. Removing it
+// would leave the device with no PIN, open to whoever taps the gear next.
 function writeKeys(storage, keys) {
   for (const key of TRANSFER_KEYS) {
     if (hasOwn(keys, key)) storage.setItem(key, keys[key]);
-    else storage.removeItem(key);
+    else if (key !== PIN_KEY) storage.removeItem(key);
   }
 }
 
@@ -443,7 +463,7 @@ export function readBackup(storage) {
   return { savedAt: Number.isFinite(savedAt) ? savedAt : null, keys };
 }
 
-// Puts back what this iPad had before the last import, then drops the Undo copy.
+// Puts back what this device had before the last import, then drops the Undo copy.
 export function undoLastImport(storage) {
   const backup = readBackup(storage);
   if (!backup) return fail('noBackup');

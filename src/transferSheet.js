@@ -1,4 +1,4 @@
-// "Move to a New iPad" screen. A plain HTML sheet laid over the game canvas,
+// "Move to a New Device" screen. A plain HTML sheet laid over the game canvas,
 // opened from the Parent Dashboard's Settings tab.
 //
 // Why HTML and not Phaser buttons: game buttons fire on finger-down, and iPadOS
@@ -15,6 +15,7 @@ import { COLORS } from './colorPalette.js';
 import {
   applyTransfer,
   buildTransferCode,
+  carriesPin,
   describeSave,
   hasMoreProgress,
   MAX_TRANSFER_CHARS,
@@ -181,7 +182,7 @@ export function openTransferSheet(scene, {
   const panel = el('div', 'cht-panel');
   panel.tabIndex = -1;
   const top = el('div', 'cht-top');
-  const title = el('h2', 'cht-title', 'Move to a New iPad');
+  const title = el('h2', 'cht-title', 'Move to a New Device');
   title.id = 'cht-title';
   const closeBtn = button('Close', 'quiet');
   closeBtn.classList.add('cht-close');
@@ -316,16 +317,16 @@ export function openTransferSheet(scene, {
 
   // ----- Home -----------------------------------------------------------
   function homeView() {
-    const h = heading('Two steps, once for each iPad');
-    body.appendChild(el('p', 'cht-p', 'Bring your child\'s pet, stars, and worlds to a new iPad.'));
+    const h = heading('Two steps, once for each device');
+    body.appendChild(el('p', 'cht-p', 'Bring your child\'s pet, stars, and worlds to a new device.'));
     body.appendChild(el('p', 'cht-fine',
-      'The Home Screen icon and Safari keep separate progress. On both iPads, open the game the same way your child plays it.'));
+      'The Home Screen icon and Safari keep separate progress. On both devices, open the game the same way your child plays it.'));
     body.appendChild(el('p', 'cht-fine',
       `Right now you are in: ${isStandalone() ? 'the Home Screen app' : 'a browser tab'}.`));
 
-    const send = button('Send this iPad\'s progress', 'primary', 'On the old iPad');
+    const send = button('Send this device\'s progress', 'primary', 'On the old device');
     send.addEventListener('click', () => showView(sendView));
-    const receive = button('Receive progress', 'primary', 'On the new iPad');
+    const receive = button('Receive progress', 'primary', 'On the new device');
     receive.addEventListener('click', () => showView(receiveView));
     body.append(send, receive);
 
@@ -341,16 +342,16 @@ export function openTransferSheet(scene, {
 
   // ----- Send -----------------------------------------------------------
   function sendView() {
-    const h = heading('Send this iPad\'s progress');
+    const h = heading('Send this device\'s progress');
     let transfer;
     try {
       transfer = buildTransferCode(storage, { now: Date.now(), catalog });
     } catch (e) {
-      body.appendChild(el('p', 'cht-p', 'This iPad\'s progress could not be read.'));
+      body.appendChild(el('p', 'cht-p', 'This device\'s progress could not be read.'));
       body.appendChild(backButton());
       return h;
     }
-    body.appendChild(summaryCard('On this iPad', transfer.summary));
+    body.appendChild(summaryCard('On this device', transfer.summary));
 
     if (transfer.summary.isEmpty) {
       body.appendChild(el('p', 'cht-warn',
@@ -378,16 +379,16 @@ export function openTransferSheet(scene, {
       share.addEventListener('click', () => shareFile(file, box, line));
       body.appendChild(share);
       body.appendChild(el('p', 'cht-fine',
-        'Pick AirDrop and choose the new iPad. You can also save it to Files or send it to yourself in Messages. Keep a copy until the move is done.'));
+        'Pick AirDrop and choose the new device. You can also save it to Files or send it to yourself in Messages. Keep a copy until the move is done.'));
       body.appendChild(copy);
     } else {
       body.appendChild(el('p', 'cht-fine',
-        'This iPad cannot share a file from here. Copy the code, paste it into Messages or Notes, and send it to yourself or to the new iPad.'));
+        'This device cannot share a file from here. Copy the code, paste it into Messages or Notes, and send it to yourself or to the new device.'));
       body.appendChild(copy);
       box.hidden = false;
     }
     body.append(line, box);
-    body.appendChild(el('p', 'cht-fine', 'Nothing on this iPad changes.'));
+    body.appendChild(el('p', 'cht-fine', 'Nothing on this device changes.'));
     body.appendChild(backButton());
     return h;
   }
@@ -408,7 +409,7 @@ export function openTransferSheet(scene, {
     }
   }
 
-  // Called straight from the click, with nothing awaited first, so the iPad
+  // Called straight from the click, with nothing awaited first, so the device
   // still counts it as a tap. The screen never waits on the promise.
   function shareFile(file, box, line) {
     let request;
@@ -420,13 +421,13 @@ export function openTransferSheet(scene, {
     }
     status(line, 'Opening the share sheet.');
     Promise.resolve(request).then(() => {
-      status(line, 'Done. Once the file is on the new iPad, open Cosmic Home there, pick any pet if it asks, and choose Receive progress. The new iPad uses the starting parent PIN until the move is done.', 'good');
+      status(line, 'Done. On the new device, open Cosmic Home and pick any pet if it asks. Tap the gear and make a grown-up PIN if it asks, then go to Settings, Move to a New Device, Receive progress. After the move, the grown-up PIN is the same as on this device.', 'good');
     }, err => {
       const name = err && err.name;
       if (name === 'AbortError') {
         status(line, 'The share sheet closed. If the file did not go through, tap Share the save file again.');
       } else if (name === 'NotAllowedError') {
-        status(line, 'The iPad did not allow that tap. Tap Share the save file again.', 'bad');
+        status(line, 'This device did not allow that tap. Tap Share the save file again.', 'bad');
       } else if (name === 'InvalidStateError') {
         status(line, 'The share sheet is already open.');
       } else {
@@ -467,7 +468,7 @@ export function openTransferSheet(scene, {
       return;
     }
     Promise.resolve(request).then(() => {
-      status(line, 'Copied. Paste it into Messages or Notes and send it to yourself or to the new iPad.', 'good');
+      status(line, 'Copied. Paste it into Messages or Notes and send it to yourself or to the new device.', 'good');
     }, manual);
   }
 
@@ -569,35 +570,37 @@ export function openTransferSheet(scene, {
     const cards = el('div', 'cht-cards');
     cards.append(
       summaryCard('From the file', fileSummary, when ? `Saved: ${when}` : null),
-      summaryCard('On this iPad now', here),
+      summaryCard('On this device now', here),
     );
     body.appendChild(cards);
 
     if (fileSummary.isEmpty) {
       body.appendChild(el('p', 'cht-warn',
-        'This file has no progress in it: no stars and no facts practiced. On the old iPad, open the game the way your child plays it, then send it again.'));
+        'This file has no progress in it: no stars and no facts practiced. On the old device, open the game the way your child plays it, then send it again.'));
       body.appendChild(backButton('Back', () => showView(receiveView)));
       return h;
     }
     if (sameSaves(parsed.keys, storage)) {
-      body.appendChild(el('p', 'cht-warn', 'This iPad already has exactly this progress. There is nothing to move.'));
+      body.appendChild(el('p', 'cht-warn', 'This device already has exactly this progress. There is nothing to move.'));
       body.appendChild(backButton('Back', () => showView(receiveView)));
       return h;
     }
 
     if (!here.isEmpty && hasMoreProgress(here, fileSummary)) {
       body.appendChild(el('p', 'cht-warn',
-        'This iPad has more progress than the file. Replacing it will remove that progress.'));
+        'This device has more progress than the file. Replacing it will remove that progress.'));
     }
     if (!here.isEmpty && here.speciesId && fileSummary.speciesId && here.speciesId !== fileSummary.speciesId) {
       body.appendChild(el('p', 'cht-warn',
-        'The pet in the file is not the pet on this iPad. Make sure this is the right child\'s file.'));
+        'The pet in the file is not the pet on this device. Make sure this is the right child\'s file.'));
     }
     body.appendChild(el('p', 'cht-fine',
-      'This erases the progress on this iPad and puts the file\'s progress in its place. The parent PIN becomes the one from the old iPad. You can undo this later from this screen.'));
+      `This erases the progress on this device and puts the file's progress in its place. ${carriesPin(parsed.keys)
+        ? 'The grown-up PIN becomes the one from the old device.'
+        : 'This device keeps its grown-up PIN.'} You can undo this later from this screen.`));
 
     const line = statusLine();
-    const replace = button('Replace this iPad\'s progress', 'danger');
+    const replace = button('Replace this device\'s progress', 'danger');
     replace.addEventListener('click', () => commit(line, () => applyTransfer(storage, parsed.keys)));
     const cancel = button('Cancel', 'quiet');
     cancel.addEventListener('click', () => showView(receiveView));
@@ -622,11 +625,13 @@ export function openTransferSheet(scene, {
     const cards = el('div', 'cht-cards');
     cards.append(
       summaryCard('Before the import', before, when ? `From ${when}` : null),
-      summaryCard('On this iPad now', hereSummary()),
+      summaryCard('On this device now', hereSummary()),
     );
     body.appendChild(cards);
     body.appendChild(el('p', 'cht-fine',
-      `This puts back what this iPad had before the import${when ? ` on ${when}` : ''}. Anything played since then is lost. The parent PIN goes back to what it was before the import.`));
+      `This puts back what this device had before the import${when ? ` on ${when}` : ''}. Anything played since then is lost. ${carriesPin(backup.keys)
+        ? 'The grown-up PIN goes back to what it was before the import.'
+        : 'The grown-up PIN stays as it is.'}`));
     const line = statusLine();
     const restore = button('Put it back', 'danger');
     restore.addEventListener('click', () => commit(line, () => undoLastImport(storage)));

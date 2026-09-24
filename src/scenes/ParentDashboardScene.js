@@ -13,6 +13,8 @@ import { createStarfield } from '../starfieldHelper.js';
 import { drawArrowLeftIcon, drawSoundIcon } from '../StatIcons.js';
 import { COLORS } from '../colorPalette.js';
 import { createPinKeypad } from '../pinKeypad.js';
+import { ParentGate, createPinDots } from '../parentGate.js';
+import { setPin, deviceStorage } from '../parentPin.js';
 import { openTransferSheet } from '../transferSheet.js';
 
 const W = 1080;
@@ -24,8 +26,6 @@ const SUCCESS = COLORS.success;
 const GOLD = 0xffd86b;       // automatic (fast + accurate)
 const SLOW_GREEN = 0x4f956b; // accurate but not yet fast — the automaticity gap
 
-const DEFAULT_PIN = '8888';
-
 export class ParentDashboardScene extends Phaser.Scene {
   constructor() {
     super({ key: 'ParentDashboardScene' });
@@ -36,89 +36,19 @@ export class ParentDashboardScene extends Phaser.Scene {
     createStarfield(this, { width: W, height: H, accentStrength: 0 });
     this.add.rectangle(W / 2, H / 2, W, H, COLORS.bgDark, 0.65).setDepth(0);
 
-    const pinVerified = this.registry.get('parentPinVerified');
-    if (!pinVerified) {
-      this.showPinEntry();
-    } else {
+    if (this.registry.get('parentPinVerified')) {
       this.showDashboard();
+      return;
     }
-  }
-
-  showPinEntry() {
-    this.add.text(W / 2, 240, 'Parent Dashboard', style('display', {
-      fontSize: '64px',
-      fill: '#ffffff'
-    })).setOrigin(0.5).setDepth(10);
-
-    this.add.text(W / 2, 320, 'Enter PIN to continue', menuStyle('body'))
-      .setOrigin(0.5).setDepth(10);
-
-    this.pinDigits = ['', '', '', ''];
-    this.currentPinIndex = 0;
-    this.pinDisplay = this.add.text(W / 2, 460, '_ _ _ _', style('display', {
-      fontSize: '96px',
-      fill: '#ffffff'
-    })).setOrigin(0.5).setDepth(10);
-
-    this.createNumberPad();
-
-    const back = createButton(this, {
-      x: W / 2, y: H - 130, label: '< Back to Game',
-      width: 360, height: 80, color: 0x4a4a6a,
-      onClick: () => this.scene.start('WorldMapScene')
-    });
-    back.setDepth(10);
-  }
-
-  createNumberPad() {
-    createPinKeypad(this, {
-      x: W / 2, y: 700,
-      onDigit: digit => this.enterDigit(digit),
-      onClear: () => this.clearPin(),
-      onBackspace: () => this.backspace(),
-    }).setDepth(10);
-  }
-
-  enterDigit(digit) {
-    if (this.currentPinIndex >= 4) return;
-    this.pinDigits[this.currentPinIndex] = digit;
-    this.currentPinIndex++;
-    this.updatePinDisplay();
-    if (this.currentPinIndex === 4) this.verifyPin();
-  }
-
-  backspace() {
-    if (this.currentPinIndex > 0) {
-      this.currentPinIndex--;
-      this.pinDigits[this.currentPinIndex] = '';
-      this.updatePinDisplay();
-    }
-  }
-
-  clearPin() {
-    this.pinDigits = ['', '', '', ''];
-    this.currentPinIndex = 0;
-    this.updatePinDisplay();
-  }
-
-  updatePinDisplay() {
-    this.pinDisplay.setText(this.pinDigits.map(d => d || '_').join(' '));
-  }
-
-  verifyPin() {
-    const enteredPin = this.pinDigits.join('');
-    const savedPin = localStorage.getItem('cosmicMathParentPin') || DEFAULT_PIN;
-    if (enteredPin === savedPin) {
-      this.registry.set('parentPinVerified', true);
-      this.scene.restart();
-    } else {
-      this.cameras.main.shake(200, 0.01);
-      this.pinDisplay.setColor('#ff6b6b');
-      this.time.delayedCall(500, () => {
-        this.pinDisplay.setColor('#ffffff');
-        this.clearPin();
-      });
-    }
+    new ParentGate(this, {
+      storage: deviceStorage(),
+      onUnlock: notice => {
+        this.registry.set('parentPinVerified', true);
+        this.registry.set('parentGateNotice', notice);
+        this.scene.restart();
+      },
+      onBack: () => this.scene.start('WorldMapScene'),
+    }).start();
   }
 
   // ============================================================
@@ -126,6 +56,9 @@ export class ParentDashboardScene extends Phaser.Scene {
   // ============================================================
   showDashboard() {
     this.currentTab = 'summary';
+    // Leaving the dashboard locks it again, so a child handed the device
+    // straight after cannot walk back in and change the PIN.
+    this.events.once('shutdown', () => this.registry.set('parentPinVerified', false));
 
     const headerBg = this.add.graphics().setDepth(10);
     headerBg.fillStyle(COLORS.bgDark, 0.92);
@@ -154,6 +87,12 @@ export class ParentDashboardScene extends Phaser.Scene {
     this.contentContainer = this.add.container(0, 0).setDepth(11);
     this.createTabs();
     this.showSummaryTab();
+
+    const notice = this.registry.get('parentGateNotice');
+    if (notice) {
+      this.registry.set('parentGateNotice', null);
+      this.flashMessage(notice, SUCCESS);
+    }
   }
 
   createTabs() {
@@ -554,9 +493,9 @@ export class ParentDashboardScene extends Phaser.Scene {
   // ----- SETTINGS -----
   showSettingsTab() {
     // Reset sits last, behind a wider gap, so the destructive button is kept
-    // apart from Move to a New iPad.
+    // apart from Move to a New Device.
     let y = 360;
-    this.addSettingButton(y, 'Move to a New iPad', () => openTransferSheet(this), ACCENT); y += 130;
+    this.addSettingButton(y, 'Move to a New Device', () => openTransferSheet(this), ACCENT); y += 130;
     this.addSettingButton(y, 'Change PIN', () => this.showChangePinDialog(), ACCENT); y += 130;
     this.addSettingButton(y, 'Lock Dashboard', () => {
       this.registry.set('parentPinVerified', false);
@@ -601,6 +540,8 @@ export class ParentDashboardScene extends Phaser.Scene {
     this.contentContainer.add(c);
   }
 
+  // Two steps, new PIN then the same again, so one typo can't lock anyone
+  // out. No old PIN is asked for: only someone already inside gets here.
   showChangePinDialog() {
     const overlay = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 0.85).setDepth(50).setInteractive();
     const c = this.add.container(W / 2, H / 2).setDepth(51);
@@ -616,40 +557,49 @@ export class ParentDashboardScene extends Phaser.Scene {
       fontSize: '48px',
       fill: '#ffd86b'
     })).setOrigin(0.5));
-    c.add(this.add.text(0, -h / 2 + 155, 'Enter new 4-digit PIN', menuStyle('body'))
-      .setOrigin(0.5));
+    const prompt = this.add.text(0, -h / 2 + 155, 'Enter a new 4-digit PIN', menuStyle('body'))
+      .setOrigin(0.5);
+    c.add(prompt);
 
-    const newPin = ['', '', '', ''];
-    let idx = 0;
-    const pinDisplay = this.add.text(0, -h / 2 + 270, '_ _ _ _', style('display', {
-      fontSize: '80px',
-      fill: '#ffffff'
+    let first = null;
+    let digits = '';
+    const dots = createPinDots(this, { y: -h / 2 + 270 });
+    c.add(dots.view);
+    const note = this.add.text(0, -h / 2 + 350, '', menuStyle('caption', {
+      fill: '#ff6b6b', align: 'center', wordWrap: { width: w - 80, useAdvancedWrap: true },
     })).setOrigin(0.5);
-    c.add(pinDisplay);
+    c.add(note);
 
-    const updateDisplay = () => pinDisplay.setText(newPin.map(d => d || '_').join(' '));
     c.add(createPinKeypad(this, {
       y: -150,
       onDigit: digit => {
-        if (idx >= 4) return;
-        newPin[idx++] = digit;
-        updateDisplay();
+        if (digits.length >= 4) return;
+        digits += digit;
+        dots.set(digits.length);
       },
       onClear: () => {
-        newPin.fill('');
-        idx = 0;
-        updateDisplay();
+        digits = '';
+        dots.set(0);
       },
       onBackspace: () => {
-        if (idx === 0) return;
-        newPin[--idx] = '';
-        updateDisplay();
+        digits = digits.slice(0, -1);
+        dots.set(digits.length);
       },
     }));
 
     const cleanup = () => {
       overlay.destroy();
       c.destroy();
+    };
+    let go = null;
+    const setGoLabel = text => go?.list.find(o => o.type === 'Text')?.setText(text);
+    const startOver = message => {
+      first = null;
+      digits = '';
+      dots.set(0);
+      prompt.setText('Enter a new 4-digit PIN');
+      setGoLabel('Next');
+      note.setText(message);
     };
 
     c.add(createButton(this, {
@@ -658,18 +608,31 @@ export class ParentDashboardScene extends Phaser.Scene {
       textOverrides: menuStyle('button'),
       onClick: cleanup
     }));
-    c.add(createButton(this, {
-      x: 150, y: h / 2 - 100, label: 'Save',
+    // One button: Next on the first step, Save on the second.
+    go = createButton(this, {
+      x: 150, y: h / 2 - 100, label: 'Next',
       width: 270, height: 100, color: SUCCESS,
       textOverrides: menuStyle('button'),
       onClick: () => {
-        if (idx === 4) {
-          localStorage.setItem('cosmicMathParentPin', newPin.join(''));
+        if (digits.length !== 4) return;
+        if (first === null) {
+          first = digits;
+          digits = '';
+          dots.set(0);
+          note.setText('');
+          prompt.setText('Type it again to be sure');
+          setGoLabel('Save');
+        } else if (digits !== first) {
+          startOver('Those didn\'t match. Try again.');
+        } else if (!setPin(deviceStorage(), digits, Date.now())) {
+          startOver('This device could not save the PIN.');
+        } else {
           cleanup();
           this.flashMessage('PIN updated', SUCCESS);
         }
       }
-    }));
+    });
+    c.add(go);
   }
 
   showResetConfirmation() {

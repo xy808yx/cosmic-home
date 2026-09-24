@@ -1,5 +1,5 @@
-// Parent / dev menu. Hidden behind a long-press + corner-tap combo from the
-// world map (see WorldMapScene). Lets Dad: max the pet and shop, replay any
+// Parent / dev menu. Hidden behind a long-press on the world map title (see
+// WorldMapScene), then a fixed code. Lets Dad: max the pet and shop, replay any
 // chapter finale, flip the conveyor pilot, open every world (with or without
 // stars), and wipe progress. Kept to one flat stack that fits a phone screen.
 
@@ -13,19 +13,43 @@ import { createButton } from '../buttonHelper.js';
 import { createModal } from '../modalHelper.js';
 import { PET_COSMETICS } from '../CosmeticManager.js';
 import { SHIP_PARTS } from '../ShipManager.js';
+import { showCodeGate } from '../parentGate.js';
+import { DEV_MENU_GUARD_STORAGE_KEY, deviceStorage } from '../parentPin.js';
 
 const W = 1080;
 const H = 1920;
+
+// Separate from the grown-up PIN, which each family now makes for itself.
+// Asked for on every visit; never shown on screen.
+const DEV_MENU_CODE = '8888';
 
 export class DevMenuScene extends Phaser.Scene {
   constructor() {
     super({ key: 'DevMenuScene' });
   }
 
-  create() {
+  // data.unlocked: the menu restarting itself (to refresh a label) skips the code.
+  create(data = {}) {
     audio.init();
     createStarfield(this, { width: W, height: H, accentColor: 0xff00ff, accentStrength: 0.18 });
+    new TransitionManager(this).fadeIn(260);
+    if (data.unlocked) {
+      this.showMenu(0);
+      return;
+    }
+    showCodeGate(this, {
+      code: DEV_MENU_CODE,
+      storage: deviceStorage(),
+      guardKey: DEV_MENU_GUARD_STORAGE_KEY,
+      // The last digit's key sits where a menu button appears, so a quick
+      // extra tap must not press it.
+      onUnlock: () => this.showMenu(400),
+      onBack: () => new TransitionManager(this).fadeToScene('WorldMapScene'),
+    });
+  }
 
+  showMenu(tapGuardMs) {
+    const readyAt = this.time.now + tapGuardMs;
     this.add.text(W / 2, 140, "DAD'S MENU", style('display', {
       fontSize: '60px',
       fill: '#ff00ff',
@@ -79,7 +103,7 @@ export class DevMenuScene extends Phaser.Scene {
         color: 0xffb142,
         onClick: () => {
           progress.setConveyorMixedEnabled(!progress.conveyorMixedEnabled);
-          this.scene.restart();
+          this.scene.restart({ unlocked: true });
         }
       },
       {
@@ -123,11 +147,13 @@ export class DevMenuScene extends Phaser.Scene {
         width: 680, height: 100,
         color: b.color,
         textOverrides: { fontSize: '28px', fill: '#0a0a1a', fontStyle: '900' },
-        onClick: () => { audio.playClick?.(); b.onClick(); }
+        onClick: () => {
+          if (this.time.now < readyAt) return;
+          audio.playClick?.();
+          b.onClick();
+        }
       });
     });
-
-    new TransitionManager(this).fadeIn(260);
   }
 
   juiceItUp() {
@@ -148,9 +174,10 @@ export class DevMenuScene extends Phaser.Scene {
       }
     }
 
-    progress.economy.stardust = 8888;
+    // Not 8888: that is the menu's code, and stardust shows on the map.
+    progress.economy.stardust = 9999;
     progress.save();
-    this.flashToast('Juiced. Pet maxed, all unlocked, 8888 ⭐');
+    this.flashToast('Juiced. Pet maxed, all unlocked, 9999 ⭐');
   }
 
   flashToast(text) {

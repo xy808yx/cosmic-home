@@ -2,13 +2,24 @@ import { audio } from './AudioManager.js';
 import { style } from './textStyles.js';
 import { COLORS } from './colorPalette.js';
 
+// Phaser 3.90 re-runs its whole key queue on every key event until the frame
+// ends, so a fast typist (or a slow frame) sees the same keydown handed over
+// two or three times. Each real key press is used once, by whichever pad sees
+// it first, even when that pad has just been replaced by the next step's pad.
+const usedKeyEvents = new WeakSet();
+
 // Shared touch and hardware keyboard input for the parent PIN screens.
 // x/y locate the center key in the first row, relative to any parent container.
+// touchDelayMs ignores taps for a moment after the pad appears, so the second
+// tap of a double-tap on the button that opened it cannot type a digit. Keys
+// on a hardware keyboard are never delayed.
 export function createPinKeypad(scene, {
   x = 0, y = 0, size = 140, spacing = 168,
-  onDigit, onClear, onBackspace,
+  onDigit, onClear, onBackspace, touchDelayMs = 0,
 } = {}) {
   const pad = scene.add.container(x, y);
+  const clock = () => (scene.time ? scene.time.now : 0);
+  const touchReadyAt = clock() + touchDelayMs;
   const keys = [
     ...Array.from({ length: 9 }, (_, i) => String(i + 1)),
     'C', '0', '<',
@@ -39,6 +50,7 @@ export function createPinKeypad(scene, {
     const hit = scene.add.rectangle(0, 0, size, size, 0x000000, 0)
       .setInteractive({ useHandCursor: true });
     hit.on('pointerdown', () => {
+      if (clock() < touchReadyAt) return;
       audio.playClick();
       activate(key);
     });
@@ -50,6 +62,8 @@ export function createPinKeypad(scene, {
 
   const keyboard = scene.input.keyboard;
   const onKey = event => {
+    if (usedKeyEvents.has(event)) return;
+    usedKeyEvents.add(event);
     if (event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
     const key = /^[0-9]$/.test(event.key) ? event.key
       : event.key === 'Backspace' ? '<'
