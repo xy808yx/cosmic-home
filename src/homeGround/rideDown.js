@@ -66,6 +66,8 @@
 //                              lights and the city's reflections in the water
 //   rd.fadeShoreLights(a, ms = 1200)   the same, faded. Promise.
 //   rd.lightEverything()       every place, lamp, group and shore light on now
+//   rd.quietPlaces(ms = 1600)  the lit places' glows shrink to small pools at
+//                              their feet and stop breathing (the last beat). Promise.
 //   rd.startIdle() / rd.stopIdle()     lamps and glows breathe, the cabin sways
 //   rd.toScreen(x, y)          near-layer point to screen point
 //   rd.textures                [{ key, w, h }] everything baked, and rd.textureBytes
@@ -419,6 +421,9 @@ const PLACES = {
   beach: { x: 1214, y: 262, glow: 1.0 },
 };
 const PLACE_IDS = ['store', 'garden', 'beach', 'bread'];
+// Each glow at the end (rd.quietPlaces): this share of its full size, dropped
+// this far so the smaller pool still sits on the ground line.
+const PLACE_QUIET = { scale: 0.5, drop: 22 };
 // Each place bakes into a box this big around its ground point.
 const PLACE_BOX = { dx: -200, dy: -230, w: 400, h: 260 };
 
@@ -1502,6 +1507,18 @@ export function createRideDown(scene, opts = {}) {
     return fadeIn(g, ms);
   };
 
+  // The last beat belongs to the names, so once the pet is home the four
+  // places stop being the show. Each glow shrinks to a small pool at its
+  // building's foot and stops breathing; it shrinks rather than fades for the
+  // same reason the idle breathes by size (a faint glow over violet goes tan).
+  let placesQuiet = false;
+  const quietGlow = (id) => ({ scale: PLACES[id].glow * PLACE_QUIET.scale, y: PLACES[id].y - 44 + PLACE_QUIET.drop });
+  const quietPlaces = (ms = 1600) => {
+    placesQuiet = true;
+    return Promise.all(PLACE_IDS.filter((id) => places[id].on).map((id) =>
+      tweenP({ targets: places[id].glow, ...quietGlow(id), duration: ms, ease: 'Sine.easeInOut' })));
+  };
+
   const setShoreLights = (a) => { shore.setAlpha(Math.max(0, Math.min(1, a))); return rd; };
   const fadeShoreLights = (a, ms = 1200) => fadeIn(shore, ms, a);
 
@@ -1549,7 +1566,7 @@ export function createRideDown(scene, opts = {}) {
     // violet would turn tan again.
     PLACE_IDS.forEach((id, i) => {
       const pl = places[id];
-      if (pl.on) idle.push(track({ targets: pl.glow, scale: PLACES[id].glow * 1.06, duration: 1900 + i * 260, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' }));
+      if (pl.on && !placesQuiet) idle.push(track({ targets: pl.glow, scale: PLACES[id].glow * 1.06, duration: 1900 + i * 260, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' }));
     });
     sway(1.2, 3600);
   };
@@ -1557,7 +1574,11 @@ export function createRideDown(scene, opts = {}) {
     idle.forEach((tw) => tw.stop());
     idle = [];
     for (const l of [...stationLamps, ...lamps]) if (l.lit) l.on.setAlpha(1);
-    for (const id of PLACE_IDS) if (places[id].on) places[id].glow.setAlpha(1).setScale(PLACES[id].glow);
+    for (const id of PLACE_IDS) {
+      if (!places[id].on) continue;
+      if (placesQuiet) { const q = quietGlow(id); places[id].glow.setAlpha(1).setScale(q.scale).setY(q.y); }
+      else places[id].glow.setAlpha(1).setScale(PLACES[id].glow);
+    }
     return settle(500);
   };
 
@@ -1648,6 +1669,7 @@ export function createRideDown(scene, opts = {}) {
     setShoreLights,
     fadeShoreLights,
     lightEverything,
+    quietPlaces,
     startIdle,
     stopIdle,
     toScreen: (x, y) => ({ x: x - scroll.x, y: y - scroll.y }),

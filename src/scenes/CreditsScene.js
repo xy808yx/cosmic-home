@@ -707,6 +707,8 @@ export class CreditsScene extends Phaser.Scene {
     at(36400, () => {
       audio.playPetChirp?.();
       rd.alight({ duration: 1000 });
+      // The places step back so the names and the message carry the end.
+      rd.quietPlaces(1600);
     });
 
     // The three names, one at a time, then the message, once, as the last beat.

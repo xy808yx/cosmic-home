@@ -617,12 +617,13 @@ export class HiddenWorldScene extends Phaser.Scene {
     this._gpFacing = -1;
     if (!companion.hasStarter()) return;
 
-    const pet = this.add.container(540, 0).setDepth(11);
+    const pet = this.add.container(520, 0).setDepth(11);
     this._roomPet = pet;
     this._roomPetSprite = drawCompanion(this, 0, 0, { scale: 1.1 });
     pet.add(this._roomPetSprite);
-    // Starts on the open floor between the desk row and the bikes.
-    pet.y = 1180 - this._gpFoot();
+    // Starts on the open floor between the desk row and the bikes, low enough
+    // that its ears stay under the "3D printer" label and left of the ebike.
+    pet.y = 1255 - this._gpFoot();
 
     // Tap → chirp + heart particle
     const hit = this.add.rectangle(0, 0, 130, 130, 0, 0)

@@ -63,7 +63,7 @@ function rig({ songCached = true, musicOn = true } = {}) {
     destroyed: 0
   };
   for (const name of ['setRide', 'setPetAt', 'openDoor', 'closeDoor', 'board', 'alight', 'sway', 'settle',
-    'lightPlace', 'lightLamp', 'lightCityGroup', 'fadeShoreLights', 'startIdle']) {
+    'lightPlace', 'lightLamp', 'lightCityGroup', 'fadeShoreLights', 'quietPlaces', 'startIdle']) {
     ride[name] = (...args) => { if (name !== 'setRide') log.push([name, ...args]); return Promise.resolve(); };
   }
   ride.destroy = () => { ride.destroyed++; };
@@ -177,6 +177,10 @@ test('the Ride Down plays its beats in order and uses only soft chimes', () => {
   assert.ok(names.lastIndexOf('lightCityGroup') < first('alight'));
   assert.ok(first('settle') < first('alight'));
   assert.ok(first('alight') < first('startIdle'));
+  // The places quiet down once the pet is home, before any name shows.
+  assert.equal(names.filter(n => n === 'quietPlaces').length, 1);
+  assert.ok(names.lastIndexOf('lightPlace') < first('quietPlaces'));
+  assert.ok(first('alight') <= first('quietPlaces') && first('quietPlaces') < first('startIdle'));
   assert.equal(names.filter(n => n === 'board').length, 1);
   assert.equal(names.filter(n => n === 'alight').length, 1);
   // No correct-answer ding anywhere in the ending.
