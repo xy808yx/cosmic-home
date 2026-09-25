@@ -81,6 +81,22 @@
       max-height: 100%;
       /* Phaser owns canvas sizing and centering inside the available area. */
     }
+    /* iOS 26 Home Screen apps report a viewport that is short by the
+       status bar (100dvh and innerHeight leave it out) while still drawing
+       the page from the very top of the screen, so the game rides up under
+       the clock and leaves a blank band at the bottom. In a Home Screen app
+       the large viewport unit is the real full screen, and it matches the
+       other units wherever that bug is absent. Keep this after the rules
+       above so it wins. */
+    @media (display-mode: standalone) {
+      html, body {
+        height: 100vh;
+        height: 100lvh;
+      }
+      #game-container {
+        max-height: none;
+      }
+    }
     #boot-loading {
       position: absolute;
       inset: 0;
@@ -93,6 +109,29 @@
 </head>
 <body>
   <div id="game-container"><p id="boot-loading" role="status">Loading…</p></div>
+  <script>
+    // Backstop for the same iOS 26 bug on phones where even the CSS above
+    // comes out short: in a full-screen Home Screen app held upright, a page
+    // short of the screen by about a status bar is sized to the whole screen.
+    // Split-screen and sideways windows are narrower than screen.width and
+    // are left alone.
+    (function () {
+      var standalone = navigator.standalone === true ||
+        (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+      if (!standalone) return;
+      var root = document.documentElement, body = document.body;
+      function fit() {
+        root.style.height = body.style.height = '';
+        var gap = screen.height - body.getBoundingClientRect().height;
+        if (window.innerWidth === screen.width && gap > 0 && gap <= 80) {
+          root.style.height = body.style.height = screen.height + 'px';
+        }
+      }
+      fit();
+      window.addEventListener('resize', fit);
+      window.addEventListener('orientationchange', fit);
+    })();
+  </script>
   <script type="module" src="/src/main.js"></script>
 </body>
 </html>
