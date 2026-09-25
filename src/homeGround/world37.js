@@ -4,8 +4,8 @@
 //
 // Wave 2 line: the little ferries. A little passenger ferry rides the line
 // with the fact on its roof, the docks across the water are the bins, and the
-// pet is the dock hand. This is also the world where the unlabeled Night Shift
-// crate rides, untouched here.
+// pet is the dock hand. This is also the world where the Science Dome's crate
+// (the one with the dome sticker) rides; it is drawn in ConveyorScene, not here.
 //
 // Cues, in plain words: the little rainbow-striped ferries crossing the water,
 // the seawall path with its rail, two parked bikes and a stroller, the big

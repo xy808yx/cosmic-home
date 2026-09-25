@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { drawTouristMap } from './homeGround/touristMap.js';
+import { drawCitySheet } from './homeGround/citySheet.js';
 
 // Drop a parallax starfield + gradient background into a scene.
 // Optional accentColor tints the bottom of the gradient (the world's accent).
@@ -159,23 +159,23 @@ export function createInnerSpaceBase(scene, opts = {}) {
 // Chapter 3 "Home Ground" map base: one summer Saturday, the daytime
 // replacement for the cosmic starfield and the living-body interior.
 // Deliberately NO white stars and NO shooting stars. The ground is a paper
-// tourist map of the family's city (src/homeGround/touristMap.js: cream paper,
-// faint water, parks, streets, the mountains along the top and the day's route
-// dashed across it), and over that sheet lies the day's light: a translucent
-// sky wash (pale morning blue up top, warm cream down at the ground), a warm
-// glow welling up from the bottom like sunlit pavement, a soft sun cast from
-// the upper corner, and one slow drifting pool of daylight that gently
-// breathes. Plain soft shapes only, no rays or sunburst (content rule). Drawn
-// behind everything (depth -10 / -9); the warm drifting motes and the edge
-// vignette are layered on top by WorldAmbience.createMapAmbience. The 28px
-// node labels keep their dark stroke, which is what carries them on a light
-// ground; the map's ink stays low-contrast for the same reason.
+// tourist map of the family's city (src/homeGround/citySheet.js: cream paper,
+// the real coast, parks, streets and the mountains along the top; the road is
+// drawn by the map itself), and over that sheet lies the day's light: a
+// translucent sky wash (pale morning blue up top, warm cream down at the
+// ground), a warm glow welling up from the bottom like sunlit pavement, a soft
+// sun cast from the upper corner, and one slow drifting pool of daylight that
+// gently breathes. Plain soft shapes only, no rays or sunburst (content rule).
+// Drawn behind everything (depth -10 / -9); the warm drifting motes are
+// layered on top by WorldAmbience.createMapAmbience. The node labels keep
+// their paper-white halo, which is what carries them on a light ground; the
+// map's ink stays low-contrast for the same reason.
 export function createHomeGroundBase(scene, opts = {}) {
-  const { width = W_DEFAULT, height = H_DEFAULT, mapInk, wash = 0.15 } = opts;
+  const { width = W_DEFAULT, height = H_DEFAULT, wash = 0.15 } = opts;
 
-  // B0: the paper map, the sheet everything else sits on. Its ink strength
-  // defaults inside drawTouristMap (MAP_INK); mapInk only overrides it.
-  const map = drawTouristMap(scene.add.graphics().setDepth(-10), { height, ink: mapInk });
+  // B0: the paper map, the sheet everything else sits on, baked once into a
+  // canvas texture and kept for later builds.
+  const map = drawCitySheet(scene, { height });
 
   // B1: the sky wash, in two stacked bands so it reads as a real one. Morning
   // blue at the top fades to a pale haze around the middle of the map, and the

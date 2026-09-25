@@ -94,6 +94,7 @@ import { records } from '../RecordsManager.js';
 import { calculateRoundResult, getRoundAccuracy } from '../RoundResults.js';
 import { drawStarIcon, drawSparkleIcon } from '../StatIcons.js';
 import { drawMasteryWall } from '../MasteryWall.js';
+import { createDomeRaceBackdrop, createDomeQuotaMeter, drawDomeCrateSticker } from '../homeGround/scienceDome.js';
 
 const W = 1080;
 const H = 1920;
@@ -139,8 +140,8 @@ const ENTRY_HOLD_MS = 4000;
 const BAR_W = 760;
 const BAR_TOP_Y = 379;            // top edge of the first bar
 
-// Chapters 1 and 2 (and the Night Shift) play against dark backdrops, where a
-// near-black track and a bare capsule read fine.
+// Chapters 1 and 2 (and the Science Dome at dusk) play against dark backdrops,
+// where a near-black track and a bare capsule read fine.
 const BARS_DARK = {
   height: 26,
   gap: 40,                        // center-to-center between the two bars
@@ -199,7 +200,7 @@ function shuffle(arr) {
 //               bossIncoming (intro card headline), bossMiss (summary title on a
 //               loss), bossStat (summary stat label), bossDone (the win banner) and
 //               quotaLine(n, world) (the deadline sentence on the intro card). A boss
-//               WIN's summary title is summaryWin. The Night Shift table below
+//               WIN's summary title is summaryWin. The Science Dome table below
 //               follows the same shape.
 //   levelTrack: the chapter's level theme. resolveTrack falls back to the Ch1 themes
 //               until the bespoke MP3s exist, so the chapter is never silent.
@@ -246,53 +247,73 @@ export const CONVEYOR_CHAPTER = {
   }
 };
 
-// The Night Shift (hidden W20): the grocery store (W31) after closing. The same
-// store the kid packed bags in that morning, now on a restocking night. It is
-// NOT a fourth chapter skin: it overrides whichever chapter skin would otherwise
-// apply, because the room's whole point is that it is a place she already knows
-// with the lights off.
-//
-// `bgTop`/`bgBottom` are absolute rather than a lift, because the chapter lifts
-// are all POSITIVE (lighten toward daylight) and lighten() has no negative clamp:
-// feeding it a negative amount would roll the channel below zero and corrupt
-// the color. An explicit night sky is both safer and easier to read.
-//
-// bgWorldId borrows the grocery store's (W31) back wall: the chapter's first
-// stop, and the one whose fridge cases and lit exit sign still make sense with
-// everything else dark. The scrim in drawBackdrop was tuned against the old
-// wall and needs a retune pass once the new W31 art is in.
-const NIGHT_SHIFT = {
-  bgWorldId: 31,
-  skin: {
-    bgTop: 0x070b14, bgBottom: 0x16223a,
-    liftTop: 0, liftBottom: 0,
-    pool: { tint: 0x8fd0ff, alpha: 0.05 },
-    halo: true,             // one cool night light left on over the belt
-    floorDarken: 0.72, beltBody: 0.72, beltSlat: 0.52,
-    // The lights are off: the paper label would glow. Back to the dark bars,
-    // and the dark HUD type with them.
-    bars: BARS_DARK,
-    hud: HUD_DARK
-  },
-  copy: {
-    title: 'NIGHT SHIFT',
-    stamp: 'PLACED',
-    chute: 'restack',
-    summaryWin: 'Floor Cleared!',
-    // Names the STATE, not the world — the world's own name is printed directly
-    // beneath it on both the HUD and the intro card, and "RUSH ORDER" sets the
-    // pattern: what kind of shift this is, then where you are.
-    bossHeadline: 'AFTER HOURS',
-    quotaLine: n => `Place all ${n} before morning.`
-  }
+// The win beat after a rush is filled: a green wash and green lettering, the
+// game's "that was right" colour, with a scatter of sparkles. A skin can carry
+// its own `win` in this shape (the Science Dome does).
+const WIN_BEAT = {
+  wash: 0x0c2a14, washAlpha: 0.6,
+  title: '#58d68d', ink: '#07120a',
+  flavor: '#d8f5c8',
+  sparkles: [COLORS.success, COLORS.warning, 0xffffff]
 };
 
-// The Night Shift table above is frozen and predates the newer boss keys, so the
-// scene fills bossMiss / bossStat / bossDone with the strings the room has always
-// shown and lets its own words win everywhere it has them (see create()).
-// bossIncoming is left out on purpose: AFTER HOURS does double duty on the HUD
-// and at the head of the intro card, as it always has.
-const NIGHT_SHIFT_FILL = { bossMiss: 'Order Unfinished', bossStat: 'ORDER', bossDone: 'BIG ORDER\nSHIPPED!' };
+// The Science Dome (hidden W39): the Chapter 3 hard secret. The same quota
+// race as a rush order, but every crate is a multiplication with one number
+// missing, and the place is the silver dome at dusk, seen across the water
+// from the seawall. Each correct crate switches on one of its lights.
+//
+// It is NOT a fourth chapter skin: it overrides the Chapter 3 daylight skin,
+// because the race happens at dusk. Everything behind the belt (sky, dome,
+// water, seawall) comes from createDomeRaceBackdrop, so the backdrop tokens
+// the chapter skins carry (gradient lift, light pool, halo, floor) are not
+// read for it; the belt, bar and HUD tokens are. Its lights, its quota meter
+// and its win beat are warm gold and white only, never bands of colours.
+//
+// The words are drafts J approves before ship (MAPS_ROOMS_ENDING_SPEC).
+const SCIENCE_DOME = {
+  skin: {
+    beltBody: 0.72, beltSlat: 0.52,
+    // Dusk: the paper label would glow. Back to the dark bars, and the dark
+    // HUD type with them, which reads on the violet sky.
+    bars: BARS_DARK,
+    hud: HUD_DARK,
+    // The intro card's headline, in the dome's own warm light.
+    headline: '#ffe9b0',
+    // The win beat: a dusk wash light enough that the lit dome still glows
+    // through it, and warm gold lettering.
+    win: {
+      wash: 0x14112e, washAlpha: 0.36,
+      title: '#ffd98a', ink: '#1b1330',
+      flavor: '#fff3d6',
+      sparkles: [0xffd98a, 0xffe9b0, 0xfffaf0]
+    }
+  },
+  copy: {
+    title: 'LIGHT IT UP',
+    stamp: 'LIT',
+    chute: 'recheck',
+    summaryWin: 'Dome Lit Up!',
+    // Names the STATE, not the world: the world's own name is printed directly
+    // beneath it on both the HUD and the intro card, and "RUSH ORDER" sets the
+    // pattern. It also heads the intro card (there is no bossIncoming).
+    bossHeadline: 'LIGHT IT UP',
+    bossMiss: 'Lights Still Off',
+    bossStat: 'LIGHTS',
+    // Two lines, like every chapter's win line, so it stays clear of the
+    // celebrating pet beside it.
+    bossDone: 'Dome\nLit Up!',
+    quotaLine: n => `Light all ${n} before closing.`
+  },
+  // Shown as the lights go down, after the kid taps the dome's crate on The
+  // Seawall's belt (see enterScienceDome).
+  discoveryLine: 'This crate is headed for the dome.\nSolve its puzzle to get in.'
+};
+
+// The dome's quota meter hangs where the quota bar would: its plate starts
+// just under the time bar and ends above the dome in the backdrop, whose
+// layout assumes this spot (see createDomeRaceBackdrop).
+const DOME_METER_Y = 456;
+const DOME_METER_H = 64;
 
 export class ConveyorScene extends Phaser.Scene {
   constructor() {
@@ -315,22 +336,22 @@ export class ConveyorScene extends Phaser.Scene {
     this.skin = chapterCfg.skin;
     this.copy = chapterCfg.copy;
 
-    // The Night Shift overrides the chapter skin entirely (see NIGHT_SHIFT), and
-    // serves INVERSE facts instead of forward ones. Keyed off the world's `belt`
-    // flag rather than a bare id so the routing, the look and the math all read
-    // from the same switch.
-    this.isNightShift = !!this.world.belt;
-    if (this.isNightShift) {
-      this.skin = NIGHT_SHIFT.skin;
-      this.copy = { ...NIGHT_SHIFT_FILL, ...NIGHT_SHIFT.copy };
+    // The Science Dome overrides the chapter skin entirely (see SCIENCE_DOME),
+    // and serves INVERSE facts instead of forward ones. Keyed off the world's
+    // `belt` flag rather than a bare id so the routing, the look and the math
+    // all read from the same switch.
+    this.isScienceDome = !!this.world.belt;
+    if (this.isScienceDome) {
+      this.skin = SCIENCE_DOME.skin;
+      this.copy = SCIENCE_DOME.copy;
     }
     // The production-vs-recognition A/B is a Chapter-3-only instrument; the Ch1/Ch2
     // pilot must not pollute that cohort, so every A/B record gates on this one flag.
-    // The Night Shift is excluded even though it IS Chapter 3: it asks a different
+    // The Science Dome is excluded even though it IS Chapter 3: it asks a different
     // question (find the missing factor, not recall the product), so folding its
     // timings into the production-vs-recognition cohort would compare two
     // different tasks and quietly poison the result.
-    this.instrumentAB = chapter === 3 && !this.isNightShift;
+    this.instrumentAB = chapter === 3 && !this.isScienceDome;
 
     // Input mode A/B (see header). Production = free-recall keypad (default);
     // recognition = labeled docks. Anything other than the explicit
@@ -360,6 +381,9 @@ export class ConveyorScene extends Phaser.Scene {
     this.foodCrate = null;
     this.secretTargetId = null;
     this.cratesUntilSecret = null;
+    this.quotaBarY = null;
+    this.domeBackdrop = null;
+    this.domeMeter = null;
 
     audio.init?.();
 
@@ -471,11 +495,16 @@ export class ConveyorScene extends Phaser.Scene {
     // CONVEYOR_CHAPTER): Ch3 lifts the palette toward daylight (a Saturday around
     // town); Ch1/Ch2 keep their own dark void / bloodstream gradient (a cold
     // salvage line / a warm cell sorter).
-    // The Night Shift has no back wall of its own. It borrows the grocery store's
-    // (W31), which is the point: same store, after closing.
-    const wb = getWorldBackground(this.isNightShift ? NIGHT_SHIFT.bgWorldId : this.worldId);
-    const top = this.skin.bgTop ?? lighten(wb.bgTop, this.skin.liftTop);
-    const bottom = this.skin.bgBottom ?? lighten(wb.bgBottom, this.skin.liftBottom);
+    // The Science Dome brings its whole picture: the dome at dusk across the
+    // water, the seawall railing and the promenade under the keypad. It is
+    // opaque and full screen, so none of the layers below are drawn for it.
+    if (this.isScienceDome) {
+      this.domeBackdrop = createDomeRaceBackdrop(this, { width: W, height: H, depth: -10 });
+      return;
+    }
+    const wb = getWorldBackground(this.worldId);
+    const top = lighten(wb.bgTop, this.skin.liftTop);
+    const bottom = lighten(wb.bgBottom, this.skin.liftBottom);
     const g = this.add.graphics().setDepth(-2);
     g.fillGradientStyle(top, top, bottom, bottom, 1);
     g.fillRect(0, 0, W, H);
@@ -496,20 +525,6 @@ export class ConveyorScene extends Phaser.Scene {
     // floor tucks under the belt band; its props rise on the wall above).
     const hz = wb.drawHorizon(this, { width: W, y: BELT_Y - 110, world: this.world });
     hz?.setDepth(-1);
-
-    // The back wall is borrowed art and draws its own DAYTIME palette, which the
-    // skin's gradient never touches, so without this the Night Shift reads as the
-    // store at nine in the morning standing on a blue floor. A cold scrim sits
-    // above the wall (-1) and below the floor/belt (1), knocking the daylit aisles
-    // back to night while leaving the fridge cases and the lit exit sign as the
-    // brightest things left on. The 0.62 alpha was tuned against the old wall and
-    // needs a retune pass once the new W31 art lands (keep the cases and the sign
-    // readable, everything else dark).
-    if (this.isNightShift) {
-      const dusk = this.add.graphics().setDepth(-0.5);
-      dusk.fillStyle(0x070b14, 0.62);
-      dusk.fillRect(0, 0, W, BELT_Y + BELT_H);
-    }
 
     // Plank floor under the belt to ground the scene (darkness per chapter). Wave 2
     // reskins it per place along with the line.
@@ -617,9 +632,12 @@ export class ConveyorScene extends Phaser.Scene {
     this.barStyle = bars;
     this.timeBarH = h;
     this.timeBarY = BAR_TOP_Y + h / 2;
-    if (this.isBoss) this.quotaBarY = this.timeBarY + bars.gap;
+    // The Science Dome counts its rush on a strip of the dome's own panels
+    // instead of a quota bar, one lit warm gold per correct crate.
+    const domeMeter = this.isBoss && this.isScienceDome;
+    this.quotaBarY = this.isBoss && !domeMeter ? this.timeBarY + bars.gap : null;
 
-    const ys = this.isBoss ? [this.timeBarY, this.quotaBarY] : [this.timeBarY];
+    const ys = this.quotaBarY != null ? [this.timeBarY, this.quotaBarY] : [this.timeBarY];
 
     // The plate. Home Ground pins its bars to a paper label so they stop
     // competing with a bright sky; the dark chapters skip it.
@@ -641,7 +659,12 @@ export class ConveyorScene extends Phaser.Scene {
     for (const y of ys) track.fillRoundedRect(x0, y - h / 2, BAR_W, h, r);
 
     this.timeBarFill = this.add.graphics().setDepth(20);
-    if (this.isBoss) this.quotaBarFill = this.add.graphics().setDepth(20);
+    if (this.quotaBarY != null) this.quotaBarFill = this.add.graphics().setDepth(20);
+    if (domeMeter) {
+      this.domeMeter = createDomeQuotaMeter(this, W / 2, DOME_METER_Y, {
+        total: this.bossMaxQuota, height: DOME_METER_H, depth: 20
+      });
+    }
 
     // The outline rides ABOVE the fills so a pale fill on a pale ground still
     // reads as a bar with an edge, whatever colour it is that second.
@@ -668,6 +691,13 @@ export class ConveyorScene extends Phaser.Scene {
   }
 
   drawQuotaBar() {
+    // The dome: the meter lights its next panel and the dome in the backdrop
+    // switches on its next light, so both count the same crates.
+    if (this.domeMeter) {
+      this.domeMeter.setCount(this.bossQuota);
+      this.domeBackdrop?.setProgress(this.bossMaxQuota > 0 ? this.bossQuota / this.bossMaxQuota : 0);
+      return;
+    }
     if (!this.quotaBarFill) return;
     const r = this.bossMaxQuota > 0 ? this.bossQuota / this.bossMaxQuota : 0;
     this.drawBarFill(this.quotaBarFill, this.quotaBarY, r, COLORS.success);
@@ -822,10 +852,10 @@ export class ConveyorScene extends Phaser.Scene {
     }
 
     // Pull the next fact (a requeued miss takes priority so the kid re-sees it).
-    // The Night Shift's crates arrive backwards (`? × 8 = 56`); everywhere else
+    // The Science Dome's crates arrive backwards (`? × 8 = 56`); everywhere else
     // they arrive forwards. Both paths honour a requeued miss, so a crate that
     // rode off the end comes back in the same form it left in.
-    const problem = this.isNightShift
+    const problem = this.isScienceDome
       ? getInverseProblem(this.worldId, this.requeuedFact)
       : getProblemForWorld(this.worldId, this.levelMode, this.requeuedFact);
     this.requeuedFact = null;
@@ -1148,9 +1178,10 @@ export class ConveyorScene extends Phaser.Scene {
     this.setDocksEnabled(false);
 
     // Which secret is riding in decides what the crate IS. Hot Pot Time arrives
-    // as dinner; The Night Shift arrives as the one crate whose label wore off.
+    // as dinner; The Science Dome arrives as the one crate with a picture of the
+    // dome where its sum should be.
     this.foodCrate = findWorld(this.secretTargetId)?.belt
-      ? this.buildUnlabeledCrate()
+      ? this.buildDomeCrate()
       : this.buildFoodCrate();
     this.foodCrate.x = -CRATE_SIZE;
     this.foodCrate.y = BELT_Y;
@@ -1229,10 +1260,10 @@ export class ConveyorScene extends Phaser.Scene {
       duration: 520, ease: 'Back.easeOut'
     });
 
-    // Belt secrets (The Night Shift) get their own cold arrival and drop straight
-    // into the round, exactly as a gauntlet warp does from GameScene.
+    // Belt secrets (The Science Dome) get their own lights-down arrival and drop
+    // straight into the round, exactly as a gauntlet warp does from GameScene.
     if (findWorld(targetId)?.belt) {
-      this.enterNightShift(targetId);
+      this.enterScienceDome(targetId);
       return;
     }
 
@@ -1275,12 +1306,13 @@ export class ConveyorScene extends Phaser.Scene {
     });
   }
 
-  // The lights go down instead of steam going up, and the kid lands straight in
-  // the round — the same "warp drops you into the fight" beat the Glitch World and
-  // King Coli already use, so the hardest secret in the game doesn't announce
-  // itself with a menu. The map node is banked either way (discoverHiddenWorld
-  // above), so a loss just means she walks back in from the map.
-  enterNightShift(targetId) {
+  // The day goes down to dusk instead of steam going up, and the kid lands
+  // straight in the round: the same "warp drops you into the fight" beat the
+  // Glitch World and King Coli already use, so the hardest secret in the game
+  // doesn't announce itself with a menu. The map node is banked either way
+  // (discoverHiddenWorld above), so a loss just means she walks back in from
+  // the map.
+  enterScienceDome(targetId) {
     this.tweens.killTweensOf(this.foodCrate);
     this.tweens.add({
       targets: this.foodCrate,
@@ -1288,13 +1320,14 @@ export class ConveyorScene extends Phaser.Scene {
       duration: 520, ease: 'Back.easeOut'
     });
 
-    // The room goes dark from the edges in: plain expanding ellipses again, but
-    // opaque and cold, so it reads as the lights being switched off one bank at a
-    // time rather than as fog rolling in.
+    // Dusk closes in from the edges: plain expanding ellipses, opaque and in
+    // the race's own evening violet, so it reads as the light going rather
+    // than as fog rolling in.
+    const dusk = 0x1b1738;
     const dark = this.add.container(ACTIVE_X, BELT_Y).setDepth(80);
     for (let i = 0; i < 22; i++) {
       const blot = this.add.graphics();
-      blot.fillStyle(0x070b14, 0.6);
+      blot.fillStyle(dusk, 0.6);
       blot.fillEllipse(0, 0, 120, 80);
       const a = Math.random() * Math.PI * 2;
       const r0 = 260 + Math.random() * 220;
@@ -1311,12 +1344,14 @@ export class ConveyorScene extends Phaser.Scene {
       });
     }
 
-    const wash = this.add.rectangle(W / 2, H / 2, W, H, 0x070b14, 0).setDepth(81);
+    const wash = this.add.rectangle(W / 2, H / 2, W, H, dusk, 0).setDepth(81);
     this.tweens.add({ targets: wash, fillAlpha: 0.96, duration: 900, ease: 'Quad.easeIn' });
 
-    const line = this.add.text(W / 2, H / 2, 'The label wore off this one.\nWork out where it goes.', style('display', {
-      fontSize: '52px', fill: '#8fd0ff', align: 'center', fontStyle: '900',
-      lineSpacing: 14
+    // The discovery line, in the dome's warm lamp light.
+    const lamp = hexStr(findWorld(targetId)?.accentColor ?? 0xffd27a);
+    const line = this.add.text(W / 2, H / 2, SCIENCE_DOME.discoveryLine, style('display', {
+      fontSize: '52px', fill: lamp, align: 'center', fontStyle: '900',
+      lineSpacing: 14, wordWrap: { width: W - 120 }
     })).setOrigin(0.5).setDepth(82).setAlpha(0);
     this.tweens.add({ targets: line, alpha: 1, duration: 420, delay: 620 });
 
@@ -1332,67 +1367,40 @@ export class ConveyorScene extends Phaser.Scene {
     });
   }
 
-  // The crate whose label wore off. Same wood as the world's own crates (it IS
-  // one of the order — that's why it's unsettling), but scuffed, with nothing
-  // left on the label plate except a torn corner of paper. No question mark: the
-  // blank is the message, and a drawn "?" would do the kid's noticing for her.
-  buildUnlabeledCrate() {
+  // The dome's crate: one of the order's own crates (same wood, slats and
+  // bolts, which is why it slips in unnoticed), but with a round sticker of
+  // the dome where the label plate should be and no sum on it. The picture is
+  // the message; no question mark.
+  buildDomeCrate() {
     const c = this.add.container(0, 0).setDepth(6);
     const s = CRATE_SIZE;
-    const wood = Phaser.Display.Color.ValueToColor(this.world.color).lighten(4).color;
-    const woodDark = Phaser.Display.Color.ValueToColor(this.world.color).darken(38).color;
 
     const shadow = this.add.graphics();
-    shadow.fillStyle(0x000000, 0.45);
+    shadow.fillStyle(0x000000, 0.4);
     shadow.fillRoundedRect(-s / 2 + 6, -s / 2 + 10, s, s, 22);
     c.add(shadow);
 
     const body = this.add.graphics();
-    body.fillStyle(wood, 1);
-    body.fillRoundedRect(-s / 2, -s / 2, s, s, 22);
-    // Plank seams + a dusty top edge, so it reads as stock that's been sitting.
-    body.fillStyle(woodDark, 0.5);
-    body.fillRect(-s / 2 + 8, -s / 2 + 76, s - 16, 5);
-    body.fillRect(-s / 2 + 8, -s / 2 + 158, s - 16, 5);
-    body.fillStyle(0x9fb4cc, 0.16);
-    body.fillRect(-s / 2 + 10, -s / 2 + 12, s - 20, 10);
-    body.lineStyle(8, woodDark, 1);
-    body.strokeRoundedRect(-s / 2, -s / 2, s, s, 22);
+    this.paintCrateBody(body);
     c.add(body);
 
-    // The label plate: a pale rectangle, empty. One ragged corner of the old
-    // label still clings on, drawn as plain triangles (no rays, no symbols).
-    const plate = this.add.graphics();
-    plate.fillStyle(0xe9e2d2, 0.9);
-    plate.fillRoundedRect(-78, -34, 156, 84, 8);
-    plate.lineStyle(4, 0xb7ad99, 1);
-    plate.strokeRoundedRect(-78, -34, 156, 84, 8);
-    // Torn strip along the top of the plate — the label that used to be there.
-    plate.fillStyle(0xd8cdb4, 1);
-    for (let i = 0; i < 6; i++) {
-      const x = -78 + i * 26;
-      plate.fillTriangle(x, -34, x + 26, -34, x + 13, -34 + (i % 2 ? 16 : 9));
-    }
-    // A single surviving shred hanging off the corner.
-    plate.fillStyle(0xf3ecdb, 1);
-    plate.fillTriangle(78, -34, 96, -22, 74, -8);
-    plate.lineStyle(3, 0xb7ad99, 1);
-    plate.strokeTriangle(78, -34, 96, -22, 74, -8);
-    c.add(plate);
+    const sticker = this.add.graphics();
+    drawDomeCrateSticker(sticker, 0, 4, 168);
+    c.add(sticker);
 
-    // Cool halo: the same invitation the food crate makes, but in the Night Shift's
-    // own cold light, so it reads as an after-hours light catching it rather than
-    // something warm arriving.
+    // Halo in the dome's warm lamp light (its accent): the same invitation the
+    // food crate makes. Nested strokes, so the glow shows around the crate.
+    const glow = findWorld(this.secretTargetId)?.accentColor ?? 0xffd27a;
     const halo = this.add.graphics();
     for (let i = 0; i < 4; i++) {
       const pad = 12 + i * 13;
-      halo.lineStyle(10, 0x8fd0ff, 0.26 - i * 0.05);
+      halo.lineStyle(10, glow, 0.30 - i * 0.06);
       halo.strokeRoundedRect(-s / 2 - pad, -s / 2 - pad, s + pad * 2, s + pad * 2, 26 + pad);
     }
     c.addAt(halo, 0);
     this.tweens.add({
       targets: halo,
-      alpha: { from: 0.4, to: 1 },
+      alpha: { from: 0.45, to: 1 },
       scaleX: { from: 1, to: 1.06 },
       scaleY: { from: 1, to: 1.06 },
       duration: 900, yoyo: true, repeat: -1, ease: 'Sine.easeInOut'
@@ -1498,18 +1506,13 @@ export class ConveyorScene extends Phaser.Scene {
 
   // ── Crate + dock art ──────────────────────────────────────────────────────
 
-  buildCrate() {
-    const c = this.add.container(0, 0).setDepth(6);
+  // The order's crate: the world's wood with plank slats, an edge frame and
+  // corner bolts in the accent colour. Shared by every sum crate and the
+  // dome's crate, which is meant to pass for one of them.
+  paintCrateBody(body) {
     const wood = Phaser.Display.Color.ValueToColor(this.world.color).lighten(8).color;
     const woodDark = Phaser.Display.Color.ValueToColor(this.world.color).darken(28).color;
     const s = CRATE_SIZE;
-
-    const shadow = this.add.graphics();
-    shadow.fillStyle(0x000000, 0.4);
-    shadow.fillRoundedRect(-s / 2 + 6, -s / 2 + 10, s, s, 22);
-    c.add(shadow);
-
-    const body = this.add.graphics();
     body.fillStyle(wood, 1);
     body.fillRoundedRect(-s / 2, -s / 2, s, s, 22);
     // Horizontal plank slats: a plain crate (no diagonal cross). This shared crate
@@ -1526,12 +1529,26 @@ export class ConveyorScene extends Phaser.Scene {
     for (const [bx, by] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
       body.fillCircle(bx * (s / 2 - 26), by * (s / 2 - 26), 7);
     }
+  }
+
+  buildCrate() {
+    const c = this.add.container(0, 0).setDepth(6);
+    const woodDark = Phaser.Display.Color.ValueToColor(this.world.color).darken(28).color;
+    const s = CRATE_SIZE;
+
+    const shadow = this.add.graphics();
+    shadow.fillStyle(0x000000, 0.4);
+    shadow.fillRoundedRect(-s / 2 + 6, -s / 2 + 10, s, s, 22);
+    c.add(shadow);
+
+    const body = this.add.graphics();
+    this.paintCrateBody(body);
     c.add(body);
 
-    // Label plate where the fact prints. The Night Shift's facts are equations
+    // Label plate where the fact prints. The Science Dome's facts are equations
     // rather than expressions, so they print on two lines and the plate is taller
     // to match (see c.reveal below).
-    const plateH = this.isNightShift ? 132 : 104;
+    const plateH = this.isScienceDome ? 132 : 104;
     const plate = this.add.graphics();
     plate.fillStyle(0xf3ead7, 1);
     plate.fillRoundedRect(-s / 2 + 26, -plateH / 2, s - 52, plateH, 14);
@@ -1970,13 +1987,15 @@ export class ConveyorScene extends Phaser.Scene {
     const wasMastered = progress.isWorldMastered(this.worldId);
     progress.completeLevel(this.worldId, this.currentLevel, stars, mastered);
 
-    // The Night Shift's trophy, granted once on the first clear: the cup of
-    // instant noodles you eat when you're the only one left in the store. Guarded
-    // on the cleared flag rather than on clearHiddenWorld's return (it returns
+    // The Science Dome's keepsake, granted once on the first clear: a Little
+    // Dome for the pet to hold, lit warm gold. It is equipped at once, so the
+    // pet in the win beat and on the summary is already holding it. Guarded on
+    // the cleared flag rather than on clearHiddenWorld's return (it returns
     // nothing) so a replay can't silently re-equip over her chosen accessory.
-    if (this.isNightShift && isWin && !progress.isHiddenWorldCleared(this.worldId)) {
+    // A kid who won Night Noodles on the old Night Shift keeps them.
+    if (this.isScienceDome && isWin && !progress.isHiddenWorldCleared(this.worldId)) {
       progress.clearHiddenWorld(this.worldId);
-      cosmetics.addAndEquip('acc_noodles');
+      cosmetics.addAndEquip('acc_little_dome');
     }
 
     // Stardust — identical reward tiers to GameScene.
@@ -2002,7 +2021,10 @@ export class ConveyorScene extends Phaser.Scene {
     // the pet progressing here too.
     const evolvedTo = companion.checkEvolutionEligibility?.();
 
-    const worldJustMastered = !wasMastered && progress.isWorldMastered(this.worldId);
+    // A secret (the Science Dome) is off the chapter's road, so it never gets
+    // the "world cleared" payoff, the same as GameScene's secrets: its own win
+    // beat is the celebration, and there is no next world for the ship to fly to.
+    const worldJustMastered = !wasMastered && progress.isWorldMastered(this.worldId) && !this.world?.hidden;
     // The "world cleared" celebration — this persisted flag (→ WorldMap ship
     // auto-advance) and the banner in the boss-win branch below — stays tied to the
     // boss climax, mirroring GameScene (see clearedThisRun there). Mastering the
@@ -2051,12 +2073,16 @@ export class ConveyorScene extends Phaser.Scene {
 
     // A boss WIN earns the Home Ground "all packed" beat, then (if this run was
     // the one that mastered the whole world) the world-cleared banner, before the
-    // summary. Everything else goes straight to the post-round flow.
+    // summary. The Science Dome first plays its own short light show on the
+    // dome (gold and white, kept smaller than the W38 finale), with nothing laid
+    // over it. Everything else goes straight to the post-round flow.
     if (this.isBoss && isWin) {
-      this.playOrderCompleteCinematic(() => {
+      const celebrate = () => this.playOrderCompleteCinematic(() => {
         if (worldJustMastered) this.showWorldClearBanner(afterEvolve);
         else afterEvolve();
       });
+      if (this.domeBackdrop) this.domeBackdrop.playWinShow(celebrate);
+      else celebrate();
     } else {
       afterEvolve();
     }
@@ -2297,12 +2323,13 @@ export class ConveyorScene extends Phaser.Scene {
     card.add(stack);
 
     // The headline is the chapter's bossIncoming. A room whose single headline does
-    // double duty (the Night Shift's AFTER HOURS) has none and shows bossHeadline
-    // instead, at the same title size.
+    // double duty (the Science Dome's LIGHT IT UP) has none and shows bossHeadline
+    // instead, at the same title size, in the skin's own headline colour if it
+    // has one.
     const incoming = this.copy.bossIncoming || this.copy.bossHeadline;
     card.add(this.add.text(0, 10, incoming, style('display', {
       fontSize: `${TYPE.title}px`,
-      fill: this.isNightShift ? '#8fd0ff' : '#ffb142', fontStyle: '900'
+      fill: this.skin.headline || '#ffb142', fontStyle: '900'
     })).setOrigin(0.5));
     card.add(this.add.text(0, 96, this.world.name, style('subhead', {
       fontSize: `${TYPE.heading}px`, fontStyle: '800', fill: hexStr(this.accent)
@@ -2327,7 +2354,7 @@ export class ConveyorScene extends Phaser.Scene {
       briefY += bt.height + 30;
     }
     // The deadline sentence. Chapter 3 reads each place's own rushLine off the world
-    // ("Pack all 44 before dark."); the pilots and the Night Shift ignore the world.
+    // ("Pack all 44 before dark."); the pilots and the Science Dome ignore the world.
     const quotaLine = this.copy.quotaLine(this.bossMaxQuota, this.world);
     const qt = this.add.text(0, briefY, quotaLine, style('body', {
       fill: '#e8e8f0', align: 'center', wordWrap: { width: W - 160 }
@@ -2364,10 +2391,13 @@ export class ConveyorScene extends Phaser.Scene {
   // Warm "all packed" beat on a boss WIN (replaces the GameScene shatter
   // cinematic: nothing is destroyed; the rush is simply done). Tap to skip.
   playOrderCompleteCinematic(onDone) {
+    // Colours come from the skin's `win` when it has one (the Science Dome's
+    // dusk and warm gold), else the green "that was right" beat (WIN_BEAT).
+    const look = this.skin.win || WIN_BEAT;
     const root = this.add.container(0, 0).setDepth(80);
-    const overlay = this.add.rectangle(W / 2, H / 2, W, H, 0x0c2a14, 0).setInteractive();
+    const overlay = this.add.rectangle(W / 2, H / 2, W, H, look.wash, 0).setInteractive();
     root.add(overlay);
-    this.tweens.add({ targets: overlay, fillAlpha: 0.6, duration: 220 });
+    this.tweens.add({ targets: overlay, fillAlpha: look.washAlpha, duration: 220 });
 
     // The victory line hangs where the top key row is and the pet stands over
     // the chute sign, so the keys, the readout and the sign step out for the
@@ -2376,7 +2406,7 @@ export class ConveyorScene extends Phaser.Scene {
     if (behind.length) this.tweens.add({ targets: behind, alpha: 0, duration: 220 });
 
     const txt = this.add.text(W / 2, H / 2 - 40, this.copy.bossDone, style('display', {
-      fontSize: '88px', fill: '#58d68d', align: 'center', fontStyle: '900', stroke: '#07120a', strokeThickness: 6
+      fontSize: '88px', fill: look.title, align: 'center', fontStyle: '900', stroke: look.ink, strokeThickness: 6
     })).setOrigin(0.5);
     txt.setScale(0);
     root.add(txt);
@@ -2391,8 +2421,8 @@ export class ConveyorScene extends Phaser.Scene {
     const flavor = this.world.flavorText;
     if (flavor) {
       const ft = this.add.text(W / 2, H / 2 + 190, flavor, style('body', {
-        fill: '#d8f5c8', align: 'center',
-        stroke: '#07120a', strokeThickness: 5,
+        fill: look.flavor, align: 'center',
+        stroke: look.ink, strokeThickness: 5,
         lineSpacing: 10, wordWrap: { width: W - 180 }
       })).setOrigin(0.5, 0);
       this.balanceWrap(ft, W - 180);
@@ -2406,7 +2436,7 @@ export class ConveyorScene extends Phaser.Scene {
       const sg = this.add.graphics();
       const sx = W / 2 + (Math.random() - 0.5) * 760;
       const sy = H / 2 + (Math.random() - 0.5) * 520;
-      drawSparkleIcon(sg, sx, sy, 14 + Math.random() * 12, [COLORS.success, COLORS.warning, 0xffffff][i % 3]);
+      drawSparkleIcon(sg, sx, sy, 14 + Math.random() * 12, look.sparkles[i % look.sparkles.length]);
       sg.setScale(0);
       root.add(sg);
       this.tweens.add({

@@ -1,7 +1,14 @@
-// Mario-style world map. All 11 worlds share a single non-scrolling 1080×1920
-// screen, connected by an S-curve path. Locked worlds stay hidden; the path
-// reveals progressively. The ship+pet sit on the active world; tapping an
-// unlocked next world animates the ship along the path to it.
+// Mario-style world map. Each chapter's worlds share a single non-scrolling
+// 1080x1920 screen, joined by one glowing road (straight 0, 45 and 90 degree
+// runs with rounded corners, like a SNES overworld). Locked worlds show as
+// silhouettes and the road reaches only as far as the newest unlocked world;
+// after a clear, the road draws itself on to the new world and the ship flies
+// there. Tapping an unlocked world flies the ship along the road to it.
+//
+// Where everything sits (worlds, secrets, gates, road legs) comes from the
+// chapter layouts in src/maps (keyed by world id); the road is baked once per
+// map build (src/maps/routeRender.js), and the still node art is baked to
+// textures too (bakeNodeArt).
 
 import Phaser from 'phaser';
 import {
@@ -20,14 +27,13 @@ import { companion, drawCompanion, CAROUSEL_STAGE_ORDER, SPECIES } from '../Comp
 import { economy } from '../EconomyManager.js';
 import { ship } from '../ShipManager.js';
 import { drawShip } from '../ShipRenderer.js';
-import {
-  buildMapPath, getNodePositions, drawPath, tForNodeIndex,
-  MAP_HEADER_H, MAP_HEADER_FADE_END,
-  HIDDEN_NODE_POSITIONS, HIDDEN_HOST_INDEX,
-  hiddenBranchControlPoint, sampleHiddenBranch
-} from '../MapPath.js';
-import { drawWorldNode } from '../WorldNodeArt.js';
-import { drawGlitchPlanetNode, drawGarageNode, drawKingColiNode, drawPlaygroundNode, drawHotPotNode, drawNightShiftNode } from './HiddenWorldScene.js';
+import { MAP_HEADER_H, MAP_HEADER_FADE_END } from '../MapPath.js';
+import { buildRoute, routePointAt, pointAt } from '../maps/routeGeom.js';
+import { RouteLayer } from '../maps/routeRender.js';
+import { checkLayoutOrder } from '../maps/mapChapters.js';
+import { drawWorldNode, bakeNodeArt } from '../WorldNodeArt.js';
+import { drawGlitchPlanetNode, drawGarageNode, drawKingColiNode, drawPlaygroundNode, drawHotPotNode } from './HiddenWorldScene.js';
+import { drawScienceDomeNode } from '../homeGround/scienceDome.js';
 import { createMapAmbience } from '../WorldAmbience.js';
 import { drawMasteryWall } from '../MasteryWall.js';
 import { paper, ink } from '../homeGround/paper.js';
@@ -69,6 +75,22 @@ const BOTTOM_CHROME_MIN_H = 220;
 // in dark ink with a paper-white halo.
 const PAPER_LABEL_INK = '#2b2016';
 const PAPER_LABEL_HALO = '#fff8e7';
+// Secret nodes: art radius, and where their name and gauntlet star row print
+// (from the node centre) unless the layout says otherwise.
+const SECRET_NODE_R = 62;
+const SECRET_LABEL_DY = SECRET_NODE_R + 26;
+const SECRET_STARS_DY = SECRET_NODE_R + 76;
+// The ship flies the road at a constant speed (px per second), each trip
+// clamped to 0.7 to 2.4 s, and lands exactly on the node.
+const SHIP_SPEED = 1000;
+const SHIP_MIN_MS = 700;
+const SHIP_MAX_MS = 2400;
+// The warp arrival glide from a host to its secret keeps its old length.
+const WARP_GLIDE_MS = 1500;
+// Unlock reveal: the road draws itself on to the new world over this long,
+// with this many soft ticks.
+const REVEAL_MS = 700;
+const REVEAL_TICKS = 3;
 
 export class WorldMapScene extends Phaser.Scene {
   constructor() {
@@ -128,22 +150,53 @@ export class WorldMapScene extends Phaser.Scene {
     }
     this._warping = false; // reset across scene.restart() (instance is reused)
 
-    this.path = buildMapPath(this.currentChapter);
-    this.nodePositions = getNodePositions(this.currentChapter);
+    // The chapter's map, from src/maps: world spots, the road's legs, and the
+    // secrets and gates that hang off host worlds. Throws if the layout does
+    // not list the chapter's worlds in play order.
+    this._mapChapter = checkLayoutOrder(this.currentChapter, this.chapterWorlds.map(w => w.id));
+    this._mapLayout = this._mapChapter.layout;
+    this._mapRoute = buildRoute(this._mapLayout);
+    this.nodePositions = this._mapLayout.order.map(id => ({ x: this._mapLayout.nodes[id].x, y: this._mapLayout.nodes[id].y }));
+    // A chapter may paint its own sheet over the stock backdrop (see
+    // mapChapters.js hooks); it sees every object the backdrop made.
+    this._mapChapter.hooks.backdrop?.(this, this.children.list.slice());
+
     this.currentWorldIndex = this.findCurrentWorldIndex();
     this.furthestUnlockedIndex = this.findFurthestUnlockedIndex();
     this._mapFootprint = this.computeMapFootprint();
+    // A secret-warp arrival grows its branch during the glide; a fresh clear
+    // flies the ship on to the next world once the map is up. Both are known
+    // now, so the map is built with the ship on the cleared world and the new
+    // leg and world held back for the reveal.
+    this._warpArrivalId = arrivalId || null;
+    this._arrivalBranch = null;
+    this._advance = this.planAutoAdvance();
+    if (this._advance) this.currentWorldIndex = this._advance.clearedIdx;
 
     // Map text and art the floating pills (YOU ARE HERE, the arcade chip) must
     // not cover. Filled in as the map builds; see placeFloatingChips.
     this._mapLabels = [];
     this._nodeDiscs = [];
     this._obstacles = [];
+    // Pieces of road drawn later (the reveal leg, an arriving branch). The
+    // label spreader keeps names off them as well as off the baked road.
+    this._roadReserved = [];
+    this._revealArt = null;
+    // Things rebuilt when the ship settles on another world. The scene
+    // instance is reused across restarts, so they start empty every build.
+    this._currentHalo = null;
+    this._bottomChrome = null;
+    this._tuneUp = null;
+    this._tuneUpRect = null;
+    this._youAreHere = null;
+    this._traveling = false;
+    this._bobTween = null;
 
     this.createHeader();
     this.createMap();
     this.createHiddenNodes();
     this.createChapterGates();
+    this.bakeRoad();
     this.spreadMapLabels();
     this.createShipOnActiveWorld();
     this.createBottomChrome();
@@ -152,8 +205,8 @@ export class WorldMapScene extends Phaser.Scene {
     this.maybeShowHomeGroundWelcome();
 
     // Warp arrival (from the warp asteroid) takes precedence over the
-    // normal auto-advance flow. If a warp arrival is in flight, still
-    // consume any stale clear-world flag so it doesn't replay later.
+    // normal auto-advance flow (planAutoAdvance plans nothing then). Either
+    // way any clear-world flag is consumed so it doesn't replay later.
     const warpArrived = this.tryWarpArrival();
     if (warpArrived) {
       progress.consumeJustClearedWorld();
@@ -204,12 +257,15 @@ export class WorldMapScene extends Phaser.Scene {
     // Bottom hairline
     bg.fillStyle(COLORS.accentTeal, 0.30);
     bg.fillRect(0, MAP_HEADER_H - 2, W, 2);
-    // Soft fade below the bar
-    const fadeSplit = MAP_HEADER_H + 24;
-    bg.fillStyle(COLORS.bgDark, 0.50);
-    bg.fillRect(0, MAP_HEADER_H, W, fadeSplit - MAP_HEADER_H);
-    bg.fillStyle(COLORS.bgDark, 0.20);
-    bg.fillRect(0, fadeSplit, W, MAP_HEADER_FADE_END - fadeSplit);
+    // Soft shadow below the bar: thin bands easing from half dark to nothing.
+    // Two flat bands used to do this; on space they vanished, but on Chapter
+    // 3's cream paper they read as two hard grey stripes.
+    const fadeH = MAP_HEADER_FADE_END - MAP_HEADER_H;
+    for (let y = 0; y < fadeH; y += 2) {
+      const s = 1 - (y + 1) / fadeH;
+      bg.fillStyle(COLORS.bgDark, 0.5 * s * s);
+      bg.fillRect(0, MAP_HEADER_H + y, W, 2);
+    }
 
     // Center the title in the space between the button groups. With two a
     // side that is the screen center, so it lines up with the chips below.
@@ -505,8 +561,9 @@ export class WorldMapScene extends Phaser.Scene {
     bloom.fillStyle(COLORS.accentTeal, 0.04);
     bloom.fillEllipse(W / 2, H * 0.55, W * 1.4, H * 0.55);
 
-    // Layered ambience: stars, drifting nebulae, shooting stars, theme particles
-    createMapAmbience(this, {
+    // Layered ambience: stars, drifting nebulae, shooting stars, theme
+    // particles (a chapter may swap in its own, see mapChapters.js hooks).
+    (this._mapChapter.hooks.ambience || createMapAmbience)(this, {
       width: W,
       height: H,
       chapter: this.currentChapter,
@@ -516,12 +573,18 @@ export class WorldMapScene extends Phaser.Scene {
       accentColors: this.chapterWorlds.map(w => w.accentColor)
     });
 
-    // Path — only segments up to (and including) the current world segment
-    // are visible; locked tail is hidden.
-    const visibleSegments = this.furthestUnlockedIndex; // segments equals (idx) since 0-based
-    drawPath(this, this.path, visibleSegments, COLORS.accentTeal, this.currentChapter).setDepth(2);
+    // The road, in the chapter's skin. Legs reach the newest unlocked world;
+    // locked legs stay hidden. Queued now and baked once, after the secrets
+    // and gates have queued their branches (bakeRoad). A leg waiting for its
+    // unlock reveal is held back and drawn by the reveal instead.
+    this._routeLayer = new RouteLayer(this, this._mapChapter.skin, { depth: 2 });
+    const reveal = this._advance?.reveal ? this._advance : null;
+    this._mapRoute.legs.slice(0, Math.max(0, this.furthestUnlockedIndex)).forEach((leg, k) => {
+      if (reveal && k === reveal.nextIdx - 1) this._roadReserved.push(leg);
+      else this.queueRoadPiece(leg);
+    });
 
-    // Nodes — unlocked render in full color, locked render as silhouette+?.
+    // Nodes: unlocked render in full color, locked render as silhouette+?.
     this.nodeContainers = {};
     for (let i = 0; i < this.chapterWorlds.length; i++) {
       const world = this.chapterWorlds[i];
@@ -530,19 +593,27 @@ export class WorldMapScene extends Phaser.Scene {
 
       this._nodeDiscs.push({ x: pos.x, y: pos.y, r: NODE_DISC_R, key: `w${world.id}` });
 
-      if (isLocked) {
+      // A world waiting for its unlock reveal shows as a silhouette until the
+      // road reaches it, then its art flips in (tryAutoAdvance).
+      const revealing = reveal && i === reveal.nextIdx;
+      if (isLocked || revealing) {
         // Render silhouette only: no label, no hit, no animation.
-        const sil = drawWorldNode(this, pos.x, pos.y, world.id, { scale: 0.95, silhouette: true });
+        const sil = bakeNodeArt(this, drawWorldNode(this, pos.x, pos.y, world.id, { scale: 0.95, silhouette: true }));
         sil.setDepth(5);
         sil.setAlpha(0.85);
-        continue;
+        if (revealing) this._revealArt = { sil, done: false };
+        else continue;
       }
 
-      const isCurrent = i === this.currentWorldIndex;
       const isCleared = progress.isWorldFullyCleared(world.id);
-      const node = drawWorldNode(this, pos.x, pos.y, world.id, { scale: 0.95 });
+      const node = bakeNodeArt(this, drawWorldNode(this, pos.x, pos.y, world.id, { scale: 0.95 }));
       node.setDepth(5);
       this.nodeContainers[world.id] = node;
+      if (revealing) {
+        this._revealArt.node = node;
+        this._revealArt.scale = node.scaleX;
+        node.scaleX = 0;
+      }
 
       // Idle gentle bob
       this.tweens.add({
@@ -573,8 +644,14 @@ export class WorldMapScene extends Phaser.Scene {
 
       // World label, kept inside the edge gutter ("PARALLEL DIMENSION" at x=880
       // would otherwise run off the right edge). spreadMapLabels nudges it
-      // sideways later if it lands on a neighbour.
-      this.addMapLabel(pos.x, pos.y + NODE_LABEL_DY, world.name, world.accentColor, `w${world.id}`);
+      // sideways later if it lands on a neighbour. A layout may print a name
+      // above its node instead (labelDy).
+      const labelDy = this._mapLayout.nodes[world.id]?.labelDy ?? NODE_LABEL_DY;
+      const label = this.addMapLabel(pos.x, pos.y + labelDy, world.name, world.accentColor, `w${world.id}`);
+      if (revealing) {
+        this._revealArt.label = label;
+        label.setAlpha(0);
+      }
 
       // Tap hit area
       const hit = this.add.circle(pos.x, pos.y, 90, 0x000000, 0)
@@ -587,24 +664,53 @@ export class WorldMapScene extends Phaser.Scene {
       hit.on('pointerout', () => {
         this.tweens.add({ targets: node, scale: 0.95, duration: 120 });
       });
-
-      // Soft static halo for the current world. Its YOU ARE HERE pill is
-      // placed once the whole map is built (placeFloatingChips).
-      if (isCurrent) {
-        const halo = this.add.graphics().setDepth(3);
-        halo.fillStyle(world.accentColor, 0.18);
-        halo.fillCircle(pos.x, pos.y, 90);
-        halo.fillStyle(world.accentColor, 0.10);
-        halo.fillCircle(pos.x, pos.y, 130);
-        halo.fillStyle(world.accentColor, 0.05);
-        halo.fillCircle(pos.x, pos.y, 170);
-      }
     }
+
+    // Soft static halo for the current world. Its YOU ARE HERE pill is placed
+    // once the whole map is built (placeFloatingChips).
+    this.drawCurrentHalo();
+  }
+
+  // The soft halo under the current world. Redrawn when the ship settles on
+  // another world (followShipTo).
+  drawCurrentHalo() {
+    this._currentHalo?.destroy();
+    this._currentHalo = null;
+    const world = this.chapterWorlds[this.currentWorldIndex];
+    const pos = this.nodePositions[this.currentWorldIndex];
+    if (!world || !pos || this.currentWorldIndex > this.furthestUnlockedIndex) return null;
+    const halo = this.add.graphics().setDepth(3);
+    halo.fillStyle(world.accentColor, 0.18);
+    halo.fillCircle(pos.x, pos.y, 90);
+    halo.fillStyle(world.accentColor, 0.10);
+    halo.fillCircle(pos.x, pos.y, 130);
+    halo.fillStyle(world.accentColor, 0.05);
+    halo.fillCircle(pos.x, pos.y, 170);
+    this._currentHalo = halo;
+    return halo;
+  }
+
+  // Queues a leg or branch on the road layer. A chapter's piecesToDraw hook
+  // may cut it (at a shore, say) or add to it.
+  queueRoadPiece(piece, opts = {}) {
+    const hook = this._mapChapter.hooks.piecesToDraw;
+    const pieces = hook ? hook(this, piece, { branch: !!opts.branch }) : [piece];
+    for (const p of pieces) this._routeLayer.add(p, opts);
+  }
+
+  // create() calls this once every leg, secret branch and gate branch is
+  // queued: bake the road, start its slow breathe, then let the chapter add
+  // anything that sits on the road (afterBake hook).
+  bakeRoad() {
+    this._routeLayer.bake();
+    this._routeLayer.startLife();
+    this._mapChapter.hooks.afterBake?.(this);
   }
 
   // A name printed on the map under a world, gate or secret. Label size, kept
   // inside the edge gutter. On the Chapter 3 paper map the pale accent fills
-  // vanish, so names there are dark ink with a paper-white halo.
+  // vanish, so names there are dark ink with a paper-white halo. A '\n' in the
+  // name splits it onto two centred lines.
   addMapLabel(x, y, name, accent, key) {
     const onPaper = this.currentChapter === 3;
     const label = this.add.text(x, y, name.toUpperCase(), style('caption', {
@@ -614,6 +720,7 @@ export class WorldMapScene extends Phaser.Scene {
       stroke: onPaper ? PAPER_LABEL_HALO : '#0a0a1a',
       strokeThickness: onPaper ? 6 : 3
     })).setOrigin(0.5).setDepth(6);
+    if (name.includes('\n')) label.setAlign('center').setLineSpacing(-6);
     label.x = this.clampToGutter(x, label.width);
     this._mapLabels.push({ text: label, key });
     return label;
@@ -634,7 +741,19 @@ export class WorldMapScene extends Phaser.Scene {
     // The ship parks on the current world and draws over everything near it.
     const here = this.nodePositions[this.currentWorldIndex];
     const shipRect = here ? new Phaser.Geom.Rectangle(here.x - 60, here.y - 96, 120, 130) : null;
-    // Other labels, node art and the ship must be cleared; the little
+    // The road counts as a row of small hard discs (one every 10 px, a little
+    // wider than the tube, shrunk like the node discs below), so a name never
+    // slides onto it.
+    const roadR = this._mapChapter.routeClear * 0.88;
+    const roadDiscs = [];
+    for (const poly of this.roadPolys()) {
+      for (let i = 1; i < poly.length; i++) {
+        const [ax, ay] = poly[i - 1], [bx, by] = poly[i];
+        const n = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / 10));
+        for (let k = 0; k < n; k++) roadDiscs.push(new Phaser.Geom.Circle(ax + (bx - ax) * k / n, ay + (by - ay) * k / n, roadR));
+      }
+    }
+    // Other labels, node art, the road and the ship must be cleared; the little
     // cleared-world stars (soft) are only avoided when a shift can manage it.
     const cost = (lab) => {
       const b = rectOf(lab.text);
@@ -645,6 +764,7 @@ export class WorldMapScene extends Phaser.Scene {
         if (d.key === lab.key || !CircleToRectangle(new Phaser.Geom.Circle(d.x, d.y, d.r * 0.88), b)) continue;
         if (d.soft) soft++; else hard++;
       }
+      for (const c of roadDiscs) if (CircleToRectangle(c, b)) hard++;
       if (shipRect && RectangleToRectangle(b, shipRect)) hard++;
       return hard * 100 + soft;
     };
@@ -689,19 +809,42 @@ export class WorldMapScene extends Phaser.Scene {
       const r = d.r * 0.8;
       this.addObstacle(new Phaser.Geom.Rectangle(d.x - r, d.y - r, r * 2, r * 2), 0, d.soft ? 0.5 : 1);
     }
+    // The pills keep off the road too: a small box every 24 px, weighted like
+    // node art.
+    for (const poly of this.roadPolys()) {
+      for (let i = 1; i < poly.length; i++) {
+        const [ax, ay] = poly[i - 1], [bx, by] = poly[i];
+        const n = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / 24));
+        for (let k = 0; k < n; k++) {
+          this.addObstacle({ x: ax + (bx - ax) * k / n - 10, y: ay + (by - ay) * k / n - 10, width: 20, height: 20 }, 0, 1);
+        }
+      }
+    }
 
     // Where the lowest world's name ends, whether or not it is unlocked yet
     // (the first world always is, and every chapter's lowest node is its first).
-    const lowestY = Math.max(...this.nodePositions.map(p => p.y));
     const labelH = this._mapLabels[0]?.text.height ?? MAP_LABEL_PX * 1.25;
-    this._lowestLabelBottom = lowestY + NODE_LABEL_DY + labelH / 2;
+    this._lowestLabelBottom = Math.max(...this._mapLayout.order.map(id => {
+      const n = this._mapLayout.nodes[id];
+      return n.y + (n.labelDy ?? NODE_LABEL_DY) + labelH / 2;
+    }));
   }
 
-  addObstacle(rect, pad = 0, weight = 1) {
+  // Every drawn (or about to be drawn) piece of road as a polyline.
+  roadPolys() {
+    return [
+      ...this._routeLayer.bakedPieces.map(it => it.piece.poly),
+      ...this._roadReserved.map(p => p.poly),
+    ];
+  }
+
+  // tag marks obstacles that move with the ship (see placeYouAreHere).
+  addObstacle(rect, pad = 0, weight = 1, tag = null) {
     const r = new Phaser.Geom.Rectangle(
       rect.x - pad, rect.y - pad, rect.width + pad * 2, rect.height + pad * 2
     );
     r.weight = weight;
+    r.tag = tag;
     this._obstacles.push(r);
   }
 
@@ -734,20 +877,28 @@ export class WorldMapScene extends Phaser.Scene {
   // spots first, when one is clear; otherwise the best spot within about 90px
   // of the node, trading what it covers against how far it drifts.
   pickSpotNearNode(w, h, pos, preferred) {
+    // A pill that ends up nearer some other world, secret or gate reads as
+    // that one's (YOU ARE HERE under The Bread Place with the ship on The
+    // Seawall), so a preferred spot like that is skipped, and in the search
+    // below it only wins when nothing else is left.
+    const others = this._nodeDiscs.filter(d => !d.soft && d.r >= 40 && Math.hypot(d.x - pos.x, d.y - pos.y) > 1);
+    const gap = (x, y, p) => Math.hypot(Math.max(x - w / 2, Math.min(p.x, x + w / 2)) - p.x,
+      Math.max(y - h / 2, Math.min(p.y, y + h / 2)) - p.y);
+    const strays = (x, y) => others.some(d => gap(x, y, d) < gap(x, y, pos));
     for (const c of preferred) {
       const x = this.clampToGutter(c.x, w);
-      if (this.coveredCost(x, c.y, w, h) === 0) return { x, y: c.y };
+      if (this.coveredCost(x, c.y, w, h) === 0 && !strays(x, c.y)) return { x, y: c.y };
     }
     let best = null;
     for (let dy = -240; dy <= 200; dy += 12) {
       for (let dx = -320; dx <= 320; dx += 16) {
         const x = this.clampToGutter(pos.x + dx, w);
         const y = pos.y + dy;
-        const nx = Math.max(x - w / 2, Math.min(pos.x, x + w / 2));
-        const ny = Math.max(y - h / 2, Math.min(pos.y, y + h / 2));
-        const drift = Math.hypot(nx - pos.x, ny - pos.y) - NODE_DISC_R;
+        const own = gap(x, y, pos);
+        const drift = own - NODE_DISC_R;
         if (drift > 90) continue;
-        const score = this.coveredCost(x, y, w, h) + 40 * Math.max(0, drift - 24);
+        const stray = strays(x, y) ? 1e7 : 0;
+        const score = this.coveredCost(x, y, w, h) + 40 * Math.max(0, drift - 24) + stray;
         if (!best || score < best.score) best = { x, y, score };
       }
     }
@@ -757,61 +908,76 @@ export class WorldMapScene extends Phaser.Scene {
   // The two pills that float over the map: YOU ARE HERE beside the current
   // world, and (after the ending) the Cosmic Arcade chip. Both are sized from
   // their text, so they are placed last, clear of every node, label, gate,
-  // secret, the ship, the Tune-Up pill, the header and the bottom panel.
+  // secret, the road, the ship, the Tune-Up pill, the header and the bottom
+  // panel.
   placeFloatingChips() {
     this.addObstacle(new Phaser.Geom.Rectangle(0, 0, W, MAP_HEADER_H), 10, 20);
-    this.addObstacle(new Phaser.Geom.Rectangle(0, this._bottomChromeTop, W, H - this._bottomChromeTop), 10, 20);
-    if (this._tuneUpRect) this.addObstacle(this._tuneUpRect, 10, 20);
+    this.placeYouAreHere();
+    if (progress.endingSeen) this.createArcadeChip();
+  }
+
+  // YOU ARE HERE beside the current world. Placed again when the ship settles
+  // on another world (followShipTo): everything that moves with the ship (the
+  // ship, the pill, the bottom panel and the Tune-Up pill, whose heights follow
+  // the world's description) is a tagged obstacle and is swapped out first.
+  placeYouAreHere() {
+    this._obstacles = this._obstacles.filter(o => o.tag !== 'here');
+    if (this._youAreHere) {
+      const old = this._youAreHere;
+      this.tweens.killTweensOf(old);
+      this.tweens.add({ targets: old, alpha: 0, duration: 200, onComplete: () => old.destroy() });
+      this._youAreHere = null;
+    }
+    this.addObstacle(new Phaser.Geom.Rectangle(0, this._bottomChromeTop, W, H - this._bottomChromeTop), 10, 20, 'here');
+    if (this._tuneUpRect) this.addObstacle(this._tuneUpRect, 10, 20, 'here');
 
     const world = this.chapterWorlds[this.currentWorldIndex];
     const pos = this.nodePositions[this.currentWorldIndex];
-    if (world && pos) {
-      // The parked ship covers the node from about 100px above its centre.
-      const shipRect = new Phaser.Geom.Rectangle(pos.x - 64, pos.y - 100, 128, 136);
-      this.addObstacle(shipRect, 6, 20);
+    if (!world || !pos) return;
+    // The parked ship covers the node from about 100px above its centre.
+    const shipRect = new Phaser.Geom.Rectangle(pos.x - 64, pos.y - 100, 128, 136);
+    this.addObstacle(shipRect, 6, 20, 'here');
 
-      const chip = this.add.container(0, 0).setDepth(16);
-      const chipText = this.add.text(0, 0, 'YOU ARE HERE', style('caption', {
-        fontSize: `${MAP_LABEL_PX}px`,
-        fill: '#0a0a1a',
-        fontStyle: '900'
-      })).setOrigin(0.5);
-      const cw = Math.ceil(chipText.width) + 44;
-      const ch = Math.ceil(chipText.height) + 14;
-      const chipBg = this.add.graphics();
-      chipBg.fillStyle(world.accentColor, 0.95);
-      chipBg.fillRoundedRect(-cw / 2, -ch / 2, cw, ch, ch / 2);
-      chipBg.lineStyle(2, 0x0a0a1a, 0.4);
-      chipBg.strokeRoundedRect(-cw / 2, -ch / 2, cw, ch, ch / 2);
-      chip.add(chipBg);
-      chip.add(chipText);
+    const chip = this.add.container(0, 0).setDepth(16);
+    const chipText = this.add.text(0, 0, 'YOU ARE HERE', style('caption', {
+      fontSize: `${MAP_LABEL_PX}px`,
+      fill: '#0a0a1a',
+      fontStyle: '900'
+    })).setOrigin(0.5);
+    const cw = Math.ceil(chipText.width) + 44;
+    const ch = Math.ceil(chipText.height) + 14;
+    const chipBg = this.add.graphics();
+    chipBg.fillStyle(world.accentColor, 0.95);
+    chipBg.fillRoundedRect(-cw / 2, -ch / 2, cw, ch, ch / 2);
+    chipBg.lineStyle(2, 0x0a0a1a, 0.4);
+    chipBg.strokeRoundedRect(-cw / 2, -ch / 2, cw, ch, ch / 2);
+    chip.add(chipBg);
+    chip.add(chipText);
 
-      // Above the ship first (the old spot), then beside the node, then under
-      // its name. Near the top of the map the header rules out "above", and
-      // under the name would sit on the next world down, so it goes beside.
-      // Where the map is crowded (the Seawall, Supernova) it takes the nearby
-      // spot that covers the least.
-      const labelBottom = pos.y + NODE_LABEL_DY + ch / 2;
-      const beside = NODE_DISC_R + 30 + cw / 2;
-      const spot = this.pickSpotNearNode(cw, ch, pos, [
-        { x: pos.x, y: shipRect.y - 12 - ch / 2 },
-        { x: pos.x + beside, y: pos.y - 20 },
-        { x: pos.x - beside, y: pos.y - 20 },
-        { x: pos.x, y: labelBottom + 12 + ch / 2 }
-      ]);
-      chip.setPosition(spot.x, spot.y);
-      this.addObstacle(new Phaser.Geom.Rectangle(spot.x - cw / 2, spot.y - ch / 2, cw, ch), 8, 20);
-      this.tweens.add({
-        targets: chip,
-        y: spot.y - 4,
-        duration: 2400,
-        yoyo: true,
-        repeat: -1,
-        ease: 'Sine.easeInOut'
-      });
-    }
-
-    if (progress.endingSeen) this.createArcadeChip();
+    // Above the ship first (the old spot), then beside the node, then under
+    // its name. Near the top of the map the header rules out "above", and
+    // under the name would sit on the next world down, so it goes beside.
+    // Where the map is crowded (the Seawall, Supernova) it takes the nearby
+    // spot that covers the least.
+    const labelBottom = pos.y + NODE_LABEL_DY + ch / 2;
+    const beside = NODE_DISC_R + 30 + cw / 2;
+    const spot = this.pickSpotNearNode(cw, ch, pos, [
+      { x: pos.x, y: shipRect.y - 12 - ch / 2 },
+      { x: pos.x + beside, y: pos.y - 20 },
+      { x: pos.x - beside, y: pos.y - 20 },
+      { x: pos.x, y: labelBottom + 12 + ch / 2 }
+    ]);
+    chip.setPosition(spot.x, spot.y);
+    this.addObstacle(new Phaser.Geom.Rectangle(spot.x - cw / 2, spot.y - ch / 2, cw, ch), 8, 20, 'here');
+    this.tweens.add({
+      targets: chip,
+      y: spot.y - 4,
+      duration: 2400,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut'
+    });
+    this._youAreHere = chip;
   }
 
   // Cosmic Arcade chip: appears only after the kid has seen the endgame. Its
@@ -859,6 +1025,8 @@ export class WorldMapScene extends Phaser.Scene {
       audio.playClick();
       new TransitionManager(this).fadeToScene('ArcadeMenuScene');
     });
+    // It stays put, so YOU ARE HERE keeps off it when it moves with the ship.
+    this.addObstacle(new Phaser.Geom.Rectangle(ax - aw / 2, ay - ah / 2, aw, ah), 8, 20);
   }
 
   // ============================================================
@@ -904,7 +1072,14 @@ export class WorldMapScene extends Phaser.Scene {
   // ============================================================
   // BOTTOM CHROME
   // ============================================================
+  // Built for the current world, and built again when the ship settles on
+  // another one (followShipTo): the old panel fades out as the new one fades in.
   createBottomChrome() {
+    const old = this._bottomChrome || [];
+    for (const o of old) {
+      this.tweens.killTweensOf(o);
+      this.tweens.add({ targets: o, alpha: 0, duration: 220, onComplete: () => o.destroy() });
+    }
     // Subtle starfield band hint at bottom
     const fade = this.add.graphics().setDepth(0);
 
@@ -970,6 +1145,14 @@ export class WorldMapScene extends Phaser.Scene {
       repeat: -1,
       ease: 'Sine.easeInOut'
     });
+
+    this._bottomChrome = [fade, nameText, subText, missionsText, hairline];
+    if (old.length) {
+      for (const o of this._bottomChrome) {
+        o.setAlpha(0);
+        this.tweens.add({ targets: o, alpha: 1, duration: 260 });
+      }
+    }
   }
 
   // Tune-Up nudge — the resurfacing call-to-action. Appears only once the kid has
@@ -978,6 +1161,13 @@ export class WorldMapScene extends Phaser.Scene {
   // drills exactly those facts. As facts get refreshed the count falls and the
   // pill quietly disappears — a finite map that keeps calling kids back.
   createTuneUpNudge() {
+    // Built again when the bottom panel changes height (followShipTo).
+    if (this._tuneUp) {
+      this.tweens.killTweensOf(this._tuneUp);
+      this._tuneUp.destroy();
+      this._tuneUp = null;
+      this._tuneUpRect = null;
+    }
     const rusty = progress.getRustyFactCount();
     if (rusty <= 0) return;
 
@@ -1022,6 +1212,7 @@ export class WorldMapScene extends Phaser.Scene {
       targets: c, scale: { from: 1, to: 1.03 },
       duration: 1000, yoyo: true, repeat: -1, ease: 'Sine.easeInOut'
     });
+    this._tuneUp = c;
   }
 
   // ============================================================
@@ -1041,43 +1232,51 @@ export class WorldMapScene extends Phaser.Scene {
     this.travelTo(targetIndex, () => this.enterWorld(targetIndex));
   }
 
-  travelTo(targetIndex, onArrive) {
-    if (this._traveling) return;
+  // Flies the ship along the road at a constant speed (each trip clamped to
+  // 0.7 to 2.4 s) and lands it exactly on the node. Scene input is off for the
+  // flight unless keepInput is set (the auto-advance keeps it, so its
+  // full-screen tap-to-skip shield still works).
+  travelTo(targetIndex, onArrive, { keepInput = false } = {}) {
+    if (this._traveling) return null;
     this._traveling = true;
-    this.input.enabled = false;
+    if (!keepInput) this.input.enabled = false;
 
     if (this._bobTween) {
       this._bobTween.stop();
       this._bobTween = null;
     }
 
-    const startT = tForNodeIndex(this.currentWorldIndex, this.currentChapter);
-    const endT = tForNodeIndex(targetIndex, this.currentChapter);
+    const route = this._mapRoute;
+    const idAt = (i) => this.chapterWorlds[i].id;
+    const d0 = route.nodeDist[idAt(this.currentWorldIndex)];
+    const d1 = route.nodeDist[idAt(targetIndex)];
+    const back = d1 < d0;
+    const duration = Math.max(SHIP_MIN_MS, Math.min(SHIP_MAX_MS, (Math.abs(d1 - d0) / SHIP_SPEED) * 1000));
+    const dest = this.nodePositions[targetIndex];
 
     audio.playLaser?.();
 
-    const tween = { t: startT };
+    const tween = { d: d0 };
     return this.tweens.add({
       targets: tween,
-      t: endT,
-      duration: 1500,
+      d: d1,
+      duration,
       ease: 'Sine.easeInOut',
       onUpdate: () => {
-        const pt = this.path.getPoint(tween.t);
-        this.shipPet.x = pt.x;
-        this.shipPet.y = pt.y - 30;
+        const p = routePointAt(route, tween.d);
+        this.shipPet.x = p.x;
+        this.shipPet.y = p.y - 30;
         // Tilt the ship in the direction of travel
-        const ahead = this.path.getPoint(Math.min(1, tween.t + 0.02));
-        const dx = ahead.x - pt.x;
-        const dy = ahead.y - pt.y;
-        const angle = Math.atan2(dy, dx) - Math.PI / 2;
-        this.shipPet.rotation = angle * 0.3;
+        const heading = back ? p.angle + Math.PI : p.angle;
+        this.shipPet.rotation = (heading - Math.PI / 2) * 0.3;
       },
       onComplete: () => {
         this.shipPet.rotation = 0;
+        this.shipPet.x = dest.x;
+        this.shipPet.y = dest.y - 30;
         this.currentWorldIndex = targetIndex;
         this._traveling = false;
-        this.input.enabled = true;
+        if (!keepInput) this.input.enabled = true;
         this._startShipBob();
         this.cameras.main.shake(180, 0.004);
         if (onArrive) {
@@ -1103,54 +1302,27 @@ export class WorldMapScene extends Phaser.Scene {
   // Space (Chapter 2). On the Chapter 2 map it surfaces back OUT to Chapter 1.
   // ============================================================
   createChapterGates() {
-    if (this.currentChapter === 1) {
-      // Entry wormhole → Chapter 2, beside Universe's End (the top-center node),
-      // gated on the Chapter 1 finale being beaten (matches Bloodstream unlock).
-      if (!progress.isWorldFullyCleared(CHAPTER1_FINAL_ID)) return;
-      const host = this.nodePositions[this.nodePositions.length - 1]; // World 11
-      const gate = { x: 220, y: 470 };
-      this.drawHiddenBranch(host, gate, 0xff7a8a);
-      this.buildGateNode(gate, {
-        accent: 0xff7a8a, core: 0xffcf6b, inward: true, label: 'INNER SPACE',
-        onTap: () => this.warpToChapter(2)
-      });
-    } else if (this.currentChapter === 2) {
-      // Return wormhole → Chapter 1 (the surface), beside the first inner world.
-      const back = this.nodePositions[0];
-      if (back) {
-        const gate = { x: 180, y: 1300 };
-        this.drawHiddenBranch(back, gate, 0x4ecdc4);
-        this.buildGateNode(gate, {
-          accent: 0x4ecdc4, core: 0xb5e6ff, inward: false, label: 'SURFACE',
-          onTap: () => this.warpToChapter(1)
-        });
+    // Every gate's spot, branch, look and unlock rule comes from the chapter
+    // layout (src/maps): Chapter 1's INNER SPACE once World 11 is beaten,
+    // Chapter 2's SURFACE (always) and HOME GROUND once World 28 is beaten,
+    // Chapter 3's INNER SPACE (always).
+    for (const [key, g] of Object.entries(this._mapLayout.gates || {})) {
+      if (g.requiresCleared != null && !progress.isWorldFullyCleared(g.requiresCleared)) continue;
+      const hostIdx = this.chapterWorlds.findIndex(w => w.id === g.host);
+      if (hostIdx < 0) continue;
+      // The gate's road only runs out of a world the kid can already see. While
+      // its host is still a locked "?" (or is the world this visit's reveal is
+      // about to open), the portal stands on its own and stays tappable; its
+      // road is drawn from the next map visit on. Chapter 3's INNER SPACE hangs
+      // off The Beach, the sixth stop, so a new arrival would otherwise see a
+      // road leading out of a locked world.
+      const revealing = this._advance?.reveal && this._advance.nextIdx === hostIdx;
+      if (hostIdx <= this.furthestUnlockedIndex && !revealing) {
+        this.queueRoadPiece(this._mapRoute.gates[key].drawn, { branch: true, accent: g.branchAccent ?? g.accent });
       }
-      // Forward gate → Chapter 3 (Home Ground), beside the Singularity Cell (the
-      // top-center node), gated on the grand finale (World 28) being cleared.
-      // Surfacing back OUT from the smallest speck to human scale, coming home
-      // to one Saturday around the family's own city. Keeps the chapter's gold.
-      if (progress.isWorldFullyCleared(CHAPTER2_FINAL_ID)) {
-        const host = this.nodePositions[this.nodePositions.length - 1]; // World 28
-        const gate = { x: 220, y: 470 };
-        this.drawHiddenBranch(host, gate, 0xffd27a);
-        this.buildGateNode(gate, {
-          accent: 0xffd27a, core: 0xfff3b8, inward: false, label: 'HOME GROUND',
-          onTap: () => this.warpToChapter(3)
-        });
-      }
-    } else {
-      // Chapter 3 (Home Ground): return gate → Chapter 2 (back inward to the body).
-      const back = this.nodePositions[0];
-      if (!back) return;
-      // Sits in the bottom-left pocket above The Grocery Store. The paper-cutout
-      // node is taller than the old lantern, and the ship's YOU ARE HERE pill
-      // parks about 105px above the node, so the gate and its label live at
-      // y 1195 (label near 1295) to clear both, and below The Big Store's label.
-      const gate = { x: 150, y: 1195 };
-      this.drawHiddenBranch(back, gate, 0xff7a8a);
-      this.buildGateNode(gate, {
-        accent: 0xff7a8a, core: 0xffcf6b, inward: true, label: 'INNER SPACE',
-        onTap: () => this.warpToChapter(2)
+      this.buildGateNode({ x: g.x, y: g.y }, {
+        accent: g.accent, core: g.core, inward: g.inward, label: g.label, labelDy: g.labelDy,
+        onTap: () => this.warpToChapter(g.warpTo)
       });
     }
   }
@@ -1161,7 +1333,7 @@ export class WorldMapScene extends Phaser.Scene {
   // inward (entry / dive) or outward (return / surface). Direction is the ONLY
   // thing that flips between the two variants. Purely concentric rings + radial
   // motes + breathing halos — never a spiral / swirl / sigil.
-  buildGateNode(pos, { accent, core = accent, inward, label, onTap }) {
+  buildGateNode(pos, { accent, core = accent, inward, label, labelDy = null, onTap }) {
     const R = 76;
     const dir = inward ? 1 : -1;
     const node = this.add.container(pos.x, pos.y).setDepth(5);
@@ -1232,11 +1404,13 @@ export class WorldMapScene extends Phaser.Scene {
     });
 
     // Gate name: the same label as a world, clamped inside the edge gutter
-    // (the Chapter 3 gate sits at x=150).
+    // (the Chapter 3 gate sits at x=150). Under the portal, with a spot above
+    // it the spreader may try; a layout labelDy pins it elsewhere instead
+    // (Chapter 3 prints it above, where its branch does not come in).
     const key = `g${pos.x},${pos.y}`;
     this._nodeDiscs.push({ x: pos.x, y: pos.y, r: R + 12, key });
-    this.addMapLabel(pos.x, pos.y + R + 24, label, accent, key);
-    this._mapLabels[this._mapLabels.length - 1].altY = pos.y - R - 24;
+    this.addMapLabel(pos.x, pos.y + (labelDy ?? R + 24), label, accent, key);
+    this._mapLabels[this._mapLabels.length - 1].altY = labelDy == null ? pos.y - R - 24 : null;
     const hit = this.add.circle(pos.x, pos.y, R + 12, 0, 0)
       .setInteractive({ useHandCursor: true }).setDepth(7);
     hit.on('pointerdown', onTap);
@@ -1405,27 +1579,37 @@ export class WorldMapScene extends Phaser.Scene {
   // HIDDEN WORLD NODES
   // ============================================================
   createHiddenNodes() {
-    // Each hidden world branches off a host in its OWN chapter, so only draw the
-    // ones belonging to the map currently being viewed (Ch1 secrets on the Ch1
-    // map, Ch2 secrets — King Coli / Recess — on the Ch2 map).
+    // Each hidden world branches off a host in its OWN chapter, so only the
+    // ones belonging to the map being viewed are drawn. Where each one sits,
+    // its host, its branch and where its name prints all come from the chapter
+    // layout (src/maps). A hidden world with no spot in the layout is not
+    // drawn (a retired secret, like The Night Shift).
+    this._mapChapter.hooks.beforeHiddenNodes?.(this);
+    const secrets = this._mapLayout.secrets || {};
     for (const h of HIDDEN_WORLDS) {
       if ((h.chapter || 1) !== this.currentChapter) continue;
+      const s = secrets[h.id];
+      if (!s) continue;
       if (!progress.isHiddenWorldDiscovered(h.id)) continue;
-      const pos = HIDDEN_NODE_POSITIONS[h.id];
-      if (!pos) continue;
+      const pos = { x: s.x, y: s.y };
+      const accent = s.accent ?? h.accentColor;
 
-      // Dashed branch path from host visible world → hidden world. Read as a
-      // "side route" that branches off the main S-curve.
-      const hostIdx = HIDDEN_HOST_INDEX[h.id];
-      if (hostIdx != null) {
-        const host = this.nodePositions[hostIdx];
-        if (host) this.drawHiddenBranch(host, pos, h.accentColor);
+      // Its branch off the host, drawn on the road in the secret's accent.
+      // A secret the ship is warping to right now grows its branch during the
+      // glide instead (tryWarpArrival).
+      const branch = this._mapRoute.secrets[h.id];
+      if (h.id === this._warpArrivalId) {
+        this._arrivalBranch = { piece: branch.drawn, offset: s.drawFrom || 0, accent };
+        this._roadReserved.push(branch.drawn);
+      } else {
+        this.queueRoadPiece(branch.drawn, { branch: true, accent });
       }
 
       const node = this.add.container(pos.x, pos.y).setDepth(5);
-      const NODE_R = 62;
+      const NODE_R = SECRET_NODE_R;
 
       if (h.id === 15) {
+        // Left live: its tears are redrawn on a timer.
         const planet = drawGlitchPlanetNode(this, 0, 0, NODE_R);
         node.add(planet);
         this.tweens.add({
@@ -1437,7 +1621,7 @@ export class WorldMapScene extends Phaser.Scene {
           ease: 'Linear'
         });
       } else if (h.id === 16) {
-        const garage = drawGarageNode(this, 0, 0, NODE_R);
+        const garage = bakeNodeArt(this, drawGarageNode(this, 0, 0, NODE_R));
         node.add(garage);
         this.tweens.add({
           targets: node,
@@ -1448,7 +1632,7 @@ export class WorldMapScene extends Phaser.Scene {
           ease: 'Sine.easeInOut'
         });
       } else if (h.id === 17) {
-        node.add(drawKingColiNode(this, 0, 0, NODE_R));
+        node.add(bakeNodeArt(this, drawKingColiNode(this, 0, 0, NODE_R)));
         this.tweens.add({
           targets: node,
           y: pos.y - 6,
@@ -1458,7 +1642,7 @@ export class WorldMapScene extends Phaser.Scene {
           ease: 'Sine.easeInOut'
         });
       } else if (h.id === 18) {
-        node.add(drawPlaygroundNode(this, 0, 0, NODE_R));
+        node.add(bakeNodeArt(this, drawPlaygroundNode(this, 0, 0, NODE_R)));
         this.tweens.add({
           targets: node,
           y: pos.y - 6,
@@ -1468,7 +1652,7 @@ export class WorldMapScene extends Phaser.Scene {
           ease: 'Sine.easeInOut'
         });
       } else if (h.id === 19) {
-        node.add(drawHotPotNode(this, 0, 0, NODE_R));
+        node.add(bakeNodeArt(this, drawHotPotNode(this, 0, 0, NODE_R)));
         this.tweens.add({
           targets: node,
           y: pos.y - 6,
@@ -1477,9 +1661,11 @@ export class WorldMapScene extends Phaser.Scene {
           repeat: -1,
           ease: 'Sine.easeInOut'
         });
-      } else if (h.id === 20) {
-        node.add(drawNightShiftNode(this, 0, 0, NODE_R));
-        // Barely moves — a building, not a vessel. The drift is there so it
+      } else if (s.art === 'scienceDome') {
+        // The Science Dome (39): lights off until it is won, then lit warm
+        // gold and white. It bakes its own art.
+        node.add(drawScienceDomeNode(this, 0, 0, NODE_R, { lit: progress.isHiddenWorldCleared(h.id) }));
+        // Barely moves: a building, not a vessel. The drift is there so it
         // doesn't sit dead next to the bobbing nodes around it.
         this.tweens.add({
           targets: node,
@@ -1491,34 +1677,31 @@ export class WorldMapScene extends Phaser.Scene {
         });
       }
 
-      // Label: sits below the larger node.
+      // Label: under the node unless the layout prints it elsewhere.
       //
       // Hidden nodes sit in the map's edge pockets by design, so a long secret
-      // name centred on the node can run off the canvas ("THE NIGHT SHIFT" at
-      // x=975 overflowed the right edge by 2px). addMapLabel clamps the label's
-      // CENTRE so the whole string stays inside the 24px gutter; the node itself
-      // stays where the layout put it, and the label slides only as far as it
-      // must. Applies to every secret, so a future long name can't reintroduce
-      // the same bug.
+      // name centred on the node can run off the canvas. addMapLabel clamps the
+      // label's CENTRE so the whole string stays inside the 24px gutter; the
+      // node itself stays where the layout put it, and the label slides only as
+      // far as it must. A layout name with '\n' prints on two centred lines.
       this._nodeDiscs.push({ x: pos.x, y: pos.y, r: NODE_R + 4, key: `h${h.id}` });
-      this.addMapLabel(pos.x, pos.y + NODE_R + 26, h.name, h.accentColor, `h${h.id}`);
+      this.addMapLabel(pos.x, pos.y + (s.labelDy ?? SECRET_LABEL_DY), s.name ?? h.name, accent, `h${h.id}`);
 
-      // Gauntlet secrets (Glitch World, King Coli) have no Level Select screen
-      // to surface their rating, so show the boss star score (levelStars[1], 0-3)
-      // right under the node label; otherwise a 3-star win records but never
-      // displays anywhere. Exploration secrets (Garage, Recess) have no stars.
+      // Gauntlet secrets (Glitch World, King Coli, the Science Dome) have no
+      // Level Select screen to surface their rating, so show the boss star
+      // score (levelStars[1], 0-3) by the node; otherwise a 3-star win records
+      // but never displays anywhere. Exploration secrets have no stars.
       if (h.kind === 'gauntlet') {
         const best = progress.worldProgress[h.id]?.levelStars?.[1] || 0;
         const starGap = 46;
-        const starY = pos.y + NODE_R + 76;
-        this._nodeDiscs.push({ x: pos.x, y: starY, r: 20, key: `h${h.id}` });
-        this._nodeDiscs.push({ x: pos.x - starGap, y: starY, r: 20, key: `h${h.id}` });
-        this._nodeDiscs.push({ x: pos.x + starGap, y: starY, r: 20, key: `h${h.id}` });
-        for (let s = 0; s < 3; s++) {
+        const starY = pos.y + (s.starsDy ?? SECRET_STARS_DY);
+        for (let k = 0; k < 3; k++) {
+          const sx = pos.x + (k - 1) * starGap;
+          this._nodeDiscs.push({ x: sx, y: starY, r: 20, key: `h${h.id}` });
           const sg = this.add.graphics().setDepth(6);
-          if (s < best) drawStarIcon(sg, 0, 0, 16);
+          if (k < best) drawStarIcon(sg, 0, 0, 16);
           else drawStarIcon(sg, 0, 0, 16, 0x3a3a50);
-          sg.x = pos.x + (s - 1) * starGap;
+          sg.x = sx;
           sg.y = starY;
         }
       }
@@ -1533,41 +1716,14 @@ export class WorldMapScene extends Phaser.Scene {
           this.registry.set('currentWorldId', h.id);
           this.registry.set('currentLevel', 1);
           this.registry.set('levelMode', 'boss');
-          // Chapter 3's gauntlet is the belt, not the asteroid field: The Night
-          // Shift is flagged `belt` and runs its quota race in the Conveyor.
+          // Chapter 3's gauntlet is the belt, not the asteroid field: the
+          // Science Dome is flagged `belt` and runs its quota race in the
+          // Conveyor.
           new TransitionManager(this).fadeToScene(h.belt ? 'ConveyorScene' : 'GameScene');
         } else {
           new TransitionManager(this).fadeToScene('HiddenWorldScene');
         }
       });
-    }
-  }
-
-  drawHiddenBranch(host, dest, accent) {
-    // Sampled dashed line with a midpoint pull so the branch arcs slightly.
-    // Shares the control-point math with the ship-travel tween so the ship
-    // visibly follows this same curve.
-    const control = hiddenBranchControlPoint(host, dest);
-    const g = this.add.graphics().setDepth(2);
-    const samples = 60;
-    const pts = [];
-    for (let i = 0; i <= samples; i++) {
-      pts.push(sampleHiddenBranch(host, dest, i / samples, control));
-    }
-    // Dark underlay
-    g.lineStyle(6, 0x121225, 0.85);
-    for (let i = 1; i < pts.length; i++) {
-      g.lineBetween(pts[i - 1].x, pts[i - 1].y, pts[i].x, pts[i].y);
-    }
-    // Dashed accent on top
-    g.lineStyle(3, accent, 0.85);
-    for (let i = 1; i < pts.length; i += 2) {
-      g.lineBetween(pts[i - 1].x, pts[i - 1].y, pts[i].x, pts[i].y);
-    }
-    // Sparkles along the branch
-    g.fillStyle(0xffffff, 0.55);
-    for (let i = 4; i < pts.length; i += 10) {
-      g.fillCircle(pts[i].x, pts[i].y, 2);
     }
   }
 
@@ -1582,14 +1738,16 @@ export class WorldMapScene extends Phaser.Scene {
     const hiddenId = this.registry.get('warpArrivalHiddenId');
     if (!hiddenId) return false;
 
-    const hostIdx = HIDDEN_HOST_INDEX[hiddenId];
-    const hiddenPos = HIDDEN_NODE_POSITIONS[hiddenId];
-    const hostPos = hostIdx != null ? this.nodePositions[hostIdx] : null;
+    // The secret's spot and host come from the chapter layout.
+    const secret = this._mapLayout.secrets?.[hiddenId];
+    const hostIdx = secret ? this.chapterWorlds.findIndex(w => w.id === secret.host) : -1;
+    const hiddenPos = secret ? { x: secret.x, y: secret.y } : null;
+    const hostPos = hostIdx >= 0 ? this.nodePositions[hostIdx] : null;
 
     // Validate BEFORE clearing flags. If anything is missing the kid still
-    // ended up on the map (triggerWarp already did discoverHiddenWorld) — drop
-    // them straight into the destination so the warp isn't silently dropped.
-    if (hostIdx == null || !hiddenPos || !hostPos) {
+    // ended up on the map (triggerWarp already did discoverHiddenWorld), so
+    // drop them straight into the destination and the warp isn't lost.
+    if (hostIdx < 0 || !hiddenPos || !hostPos) {
       this.registry.set('warpArrivalHiddenId', null);
       this.registry.set('warpArrivalFromWorldId', null);
       this._enterHiddenDestination(hiddenId);
@@ -1638,7 +1796,7 @@ export class WorldMapScene extends Phaser.Scene {
     // Brief settle so the warp cinematic's fade has fully cleared before
     // the ship animates off.
     this.time.delayedCall(450, () => {
-      this._travelAlongBranch(hostPos, hiddenPos, finishArrival);
+      this._travelAlongBranch(hiddenId, finishArrival);
     });
 
     return true;
@@ -1690,25 +1848,33 @@ export class WorldMapScene extends Phaser.Scene {
     };
   }
 
-  _travelAlongBranch(host, dest, onArrive) {
-    const control = hiddenBranchControlPoint(host, dest);
+  // The warp-arrival glide: the ship flies the secret's branch from its host
+  // (keeping the old 1.5 s), and the branch's road draws itself right behind
+  // the ship, so the new side path appears as it is flown.
+  _travelAlongBranch(hiddenId, onArrive) {
+    const piece = this._mapRoute.secrets[hiddenId];
+    const dest = { x: piece.pts[piece.pts.length - 1][0], y: piece.pts[piece.pts.length - 1][1] };
+    const arriving = this._arrivalBranch;
+    const grower = arriving ? this._routeLayer.grower(arriving.piece, { branch: true, accent: arriving.accent }) : null;
     audio.playLaser?.();
-    const tween = { t: 0 };
+    const tween = { d: 0 };
     return this.tweens.add({
       targets: tween,
-      t: 1,
-      duration: 1500,
+      d: piece.length,
+      duration: WARP_GLIDE_MS,
       ease: 'Sine.easeInOut',
       onUpdate: () => {
-        const pt = sampleHiddenBranch(host, dest, tween.t, control);
-        this.shipPet.x = pt.x;
-        this.shipPet.y = pt.y - 30;
-        const ahead = sampleHiddenBranch(host, dest, Math.min(1, tween.t + 0.02), control);
-        const angle = Math.atan2(ahead.y - pt.y, ahead.x - pt.x) - Math.PI / 2;
-        this.shipPet.rotation = angle * 0.3;
+        const p = pointAt(piece, tween.d);
+        this.shipPet.x = p.x;
+        this.shipPet.y = p.y - 30;
+        this.shipPet.rotation = (p.angle - Math.PI / 2) * 0.3;
+        grower?.setLength(tween.d - arriving.offset);
       },
       onComplete: () => {
+        grower?.finish();
         this.shipPet.rotation = 0;
+        this.shipPet.x = dest.x;
+        this.shipPet.y = dest.y - 30;
         this.cameras.main.shake(180, 0.004);
         onArrive?.();
       }
@@ -1717,7 +1883,7 @@ export class WorldMapScene extends Phaser.Scene {
 
   _enterHiddenDestination(hiddenId) {
     // Gauntlet secrets (Glitch, King Coli) drop into a GameScene boss fight; the
-    // belt-flagged one (The Night Shift) runs its quota race in the Conveyor;
+    // belt-flagged one (The Science Dome) runs its quota race in the Conveyor;
     // exploration secrets (Garage, Recess) open their HiddenWorldScene.
     const hidden = findWorld(hiddenId);
     if (hidden?.kind === 'gauntlet') {
@@ -1733,42 +1899,75 @@ export class WorldMapScene extends Phaser.Scene {
   // ============================================================
   // AUTO-ADVANCE SHIP (after a world is cleared)
   // ============================================================
-  tryAutoAdvance() {
+  // Called from create() before the map is built: is there a fresh clear to
+  // fly on from, and does its next world need the unlock reveal? Returns
+  // { clearedIdx, nextIdx, reveal } or null. Nothing is planned for a warp
+  // arrival, the chapter's last world, a clear on another chapter's map, or a
+  // next world the mastery gate still keeps locked (the ship never flies to a
+  // locked world). The reveal plays when the new leg is the newest one.
+  planAutoAdvance() {
+    if (this._warpArrivalId) return null;
     const cleared = progress.justClearedWorld;
-    if (!cleared) return;
-
+    if (!cleared) return null;
     const nextId = getNextVisibleWorldId(cleared);
-    if (!nextId) {
-      // Just cleared the final world — credits handle the flow, nothing to do.
-      progress.consumeJustClearedWorld();
-      return;
-    }
-
+    if (!nextId) return null;
     const clearedIdx = this.chapterWorlds.findIndex(w => w.id === cleared);
     const nextIdx = this.chapterWorlds.findIndex(w => w.id === nextId);
+    if (clearedIdx < 0 || nextIdx < 0 || nextIdx > this.furthestUnlockedIndex) return null;
+    return { clearedIdx, nextIdx, reveal: nextIdx === this.furthestUnlockedIndex };
+  }
 
-    if (clearedIdx < 0 || nextIdx < 0) {
-      progress.consumeJustClearedWorld();
-      return;
-    }
+  // After a clear: a short hold on the cleared world, then (for a new unlock)
+  // the road draws itself on to the new world with a few soft ticks, the new
+  // world's art flips in, and the ship flies there. When it lands, YOU ARE
+  // HERE, the halo and the bottom panel follow it. A tap anywhere skips to
+  // the end.
+  tryAutoAdvance() {
+    const plan = this._advance;
+    this._advance = null;
+    if (progress.justClearedWorld) progress.consumeJustClearedWorld();
+    if (!plan) return;
+    const { clearedIdx, nextIdx, reveal } = plan;
+    const leg = this._mapRoute.legs[nextIdx - 1];
 
-    // Position ship at cleared world, animate to next.
-    this.currentWorldIndex = clearedIdx;
+    // The ship starts on the cleared world (create built the map there).
     const startPos = this.nodePositions[clearedIdx];
     this.shipPet.x = startPos.x;
     this.shipPet.y = startPos.y - 30;
 
-    progress.consumeJustClearedWorld();
-
     // Allow a tap to skip the animation.
     const skipHit = this.add.rectangle(W / 2, H / 2, W, H, 0, 0)
       .setInteractive().setDepth(50);
-    let skipped = false;
+    let done = false;
+    let growTween = null;
     let travelTween = null;
+    let grower = null;
+    const ensureGrower = () => {
+      if (reveal && !grower) grower = this._routeLayer.grower(leg);
+      return grower;
+    };
+    const arrive = () => {
+      skipHit.destroy();
+      this.followShipTo(nextIdx);
+      this.showNewWorldTooltip(nextIdx);
+    };
+    const fly = () => {
+      if (done) return;
+      // YOU ARE HERE lets go of the cleared world as the ship leaves.
+      if (this._youAreHere) this.tweens.add({ targets: this._youAreHere, alpha: 0, duration: 200 });
+      travelTween = this.travelTo(nextIdx, () => {
+        if (done) return;
+        done = true;
+        arrive();
+      }, { keepInput: true });
+    };
     const skip = () => {
-      if (skipped) return;
-      skipped = true;
-      if (travelTween) travelTween.stop();
+      if (done) return;
+      done = true;
+      growTween?.stop();
+      travelTween?.stop();
+      ensureGrower()?.finish();
+      this.flipInRevealedWorld(true);
       const dest = this.nodePositions[nextIdx];
       this.shipPet.x = dest.x;
       this.shipPet.y = dest.y - 30;
@@ -1776,34 +1975,108 @@ export class WorldMapScene extends Phaser.Scene {
       this.currentWorldIndex = nextIdx;
       this._traveling = false;
       this._startShipBob();
-      skipHit.destroy();
       this.input.enabled = true;
-      this.showNewWorldTooltip(nextIdx);
+      arrive();
     };
     skipHit.on('pointerdown', skip);
 
     // 600ms hold on the cleared world so the kid registers "you cleared this,"
-    // then ship walks the path toward the freshly-unlocked node.
+    // then the road reaches out to the freshly-unlocked world.
     this.time.delayedCall(600, () => {
-      if (skipped) return;
-      travelTween = this.travelTo(nextIdx, () => {
-        skipHit.destroy();
-        this.showNewWorldTooltip(nextIdx);
+      if (done) return;
+      if (!reveal) return fly();
+      ensureGrower();
+      const p = { d: 0 };
+      let ticks = 0;
+      growTween = this.tweens.add({
+        targets: p,
+        d: leg.length,
+        duration: REVEAL_MS,
+        ease: 'Sine.easeInOut',
+        onUpdate: () => {
+          grower.setLength(p.d);
+          // A soft tick every so often as the road grows.
+          while (ticks < REVEAL_TICKS && p.d >= (leg.length * ticks) / REVEAL_TICKS) {
+            ticks++;
+            audio.playStardustTick?.();
+          }
+        },
+        onComplete: () => {
+          grower.finish();
+          if (done) return;
+          this.flipInRevealedWorld(false, fly);
+        }
       });
     });
+  }
+
+  // The newly reached world swaps its silhouette for its art: the silhouette
+  // folds away, the art unfolds, and its name fades in. instant skips the
+  // motion (tap-to-skip).
+  flipInRevealedWorld(instant, then) {
+    const art = this._revealArt;
+    if (!art || art.done) { then?.(); return; }
+    art.done = true;
+    if (instant) {
+      this.tweens.killTweensOf(art.sil);
+      art.sil.destroy();
+      art.node.scaleX = art.scale;
+      art.label.setAlpha(1);
+      then?.();
+      return;
+    }
+    this.tweens.add({
+      targets: art.sil, scaleX: 0, duration: 140, ease: 'Quad.easeIn',
+      onComplete: () => {
+        art.sil.destroy();
+        audio.playStardustChime?.();
+        this.tweens.add({ targets: art.label, alpha: 1, duration: 240 });
+        this.tweens.add({
+          targets: art.node, scaleX: art.scale, duration: 240, ease: 'Back.easeOut',
+          onComplete: () => then?.()
+        });
+      }
+    });
+  }
+
+  // The ship has settled on another world: everything that says "you are
+  // here" moves with it (the halo, the bottom panel, the Tune-Up pill that
+  // sits on the panel, the YOU ARE HERE pill), and the ship stays parked
+  // here when the kid comes back to the map.
+  followShipTo(idx) {
+    this.currentWorldIndex = idx;
+    const world = this.chapterWorlds[idx];
+    if (world) this.registry.set('shipParkedWorldId', world.id);
+    const halo = this.drawCurrentHalo();
+    if (halo) {
+      halo.setAlpha(0);
+      this.tweens.add({ targets: halo, alpha: 1, duration: 300 });
+    }
+    this.createBottomChrome();
+    this.createTuneUpNudge();
+    this.placeYouAreHere();
+    // A neighbour's name under the parked ship prints above it (as the
+    // label spreader does for the ship's first spot).
+    const pos = this.nodePositions[idx];
+    const shipRect = new Phaser.Geom.Rectangle(pos.x - 60, pos.y - 96, 120, 130);
+    for (const lab of this._mapLabels) {
+      const over = Phaser.Geom.Intersects.RectangleToRectangle(lab.text.getBounds(), shipRect);
+      lab.text.setDepth(over ? 21 : 6);
+    }
   }
 
   showNewWorldTooltip(nextIdx) {
     const pos = this.nodePositions[nextIdx];
     if (!pos) return;
     const world = this.chapterWorlds[nextIdx];
-    // Pulse the freshly-unlocked node — three cycles, scale 1.0 → 1.15 → 1.0.
-    // Signals "this is the new spot you can play now" before the tooltip fires.
+    // Pulse the freshly-unlocked node, three cycles, from its map size (0.95)
+    // up 15% and back. Signals "this is the new spot you can play now" before
+    // the tooltip fires.
     const node = this.nodeContainers?.[world?.id];
     if (node) {
       this.tweens.add({
         targets: node,
-        scale: { from: 1, to: 1.15 },
+        scale: { from: 0.95, to: 1.1 },
         duration: 320,
         yoyo: true,
         repeat: 2,

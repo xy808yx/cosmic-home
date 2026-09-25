@@ -7,7 +7,11 @@
 //
 // Chapters 1 and 2 are drawn inline below. Chapter 3 "Home Ground" (worlds 31
 // to 38) lives in src/homeGround and is registered at the bottom of this file.
+//
+// bakeNodeArt (at the end) turns a node's still drawings into cached textures
+// for the world map, so they are not redrawn every frame.
 
+import Phaser from 'phaser';
 import { style } from './textStyles.js';
 import { HOME_GROUND_WORLDS } from './homeGround/index.js';
 
@@ -784,4 +788,81 @@ NODE_RENDERERS[28] = function drawTheSingularityCell(scene, c, _s) {
 for (const id of Object.keys(HOME_GROUND_WORLDS)) {
   const world = HOME_GROUND_WORLDS[id];
   NODE_RENDERERS[id] = (scene, c, s) => world.drawNode(scene, c, s);
+}
+
+// ── Baking node art for the world map ─────────────────────────────────────
+// A node is 1 to 6 Graphics of plain shapes (the paper-cutout Chapter 3 ones
+// run to thousands of commands), and Phaser redraws every Graphics every
+// frame. bakeNodeArt paints each run of STILL Graphics in a node container
+// once into a canvas texture and swaps the run for one Image in the same slot.
+// The container keeps its own bob, hover scale and pulse, and any child that a
+// tween moves (steam, a chimney wisp, a breathing window) stays live, as does
+// anything that is not a Graphics (text). Only use it on a node whose code
+// never touches a child again after drawing it (Glitch World redraws its
+// tears on a timer, so the map leaves that one live).
+//
+// Canvas textures keep their pixels through a lost WebGL context (iOS drops it
+// when the app is put away) and go back to the GPU on restore. Every texture
+// is removed when the scene shuts down. BOX is the square each run is painted
+// into, centred on the node: wider than any node's art reaches (the widest,
+// with glows and shadows, reach about 100 px from the centre).
+const BAKE_BOX = 256;
+let bakeSerial = 0;
+
+function bakedKeysFor(scene) {
+  if (scene.__nodeArtKeys) return scene.__nodeArtKeys;
+  const keys = [];
+  scene.__nodeArtKeys = keys;
+  const renderer = scene.sys.game.renderer;
+  const onRestore = () => {
+    for (const k of keys) {
+      const tex = scene.textures.exists(k) && scene.textures.get(k);
+      if (tex && typeof tex.refresh === 'function') tex.refresh();
+    }
+  };
+  if (renderer && typeof renderer.on === 'function') renderer.on('restorewebgl', onRestore);
+  scene.events.once('shutdown', () => {
+    if (renderer && typeof renderer.off === 'function') renderer.off('restorewebgl', onRestore);
+    for (const k of keys) if (scene.textures.exists(k)) scene.textures.remove(k);
+    scene.__nodeArtKeys = null;
+  });
+  return keys;
+}
+
+export function bakeNodeArt(scene, container, { box = BAKE_BOX } = {}) {
+  if (!container || !container.list) return container;
+  const renderer = scene.sys.game.renderer;
+  const cam = Phaser.GameObjects.Graphics.TargetCamera;
+  const keys = bakedKeysFor(scene);
+  const still = (o) => o.type === 'Graphics' && o.visible && o.blendMode === Phaser.BlendModes.NORMAL
+    && !scene.tweens.isTweening(o);
+
+  let run = [];
+  const flush = () => {
+    if (!run.length) return;
+    const key = `__nodeArt${++bakeSerial}`;
+    const tex = scene.textures.createCanvas(key, box, box);
+    keys.push(key);
+    const ctx = tex.getContext();
+    // Paint with Phaser's own canvas renderer for Graphics, through a camera
+    // scrolled so the container's centre lands in the middle of the box. Each
+    // Graphics brings its own position, scale and alpha.
+    cam.setScene(scene);
+    cam.setViewport(0, 0, box, box);
+    cam.scrollX = -box / 2;
+    cam.scrollY = -box / 2;
+    for (const g of run) g.renderCanvas(renderer, g, cam, null, ctx, false);
+    if (cam.renderList) cam.renderList.length = 0;
+    tex.refresh();
+    const idx = container.getIndex(run[0]);
+    for (const g of run) container.remove(g, true);
+    container.addAt(scene.add.image(0, 0, key), idx);
+    run = [];
+  };
+  for (const child of container.list.slice()) {
+    if (still(child)) run.push(child);
+    else flush();
+  }
+  flush();
+  return container;
 }

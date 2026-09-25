@@ -10,9 +10,6 @@
 // Cues, in plain words: the flower buckets by the front door, the cart with
 // the wobbly wheel, the stack of red baskets, the take-a-number ticket at the
 // deli, the fridge cases glowing, and aisle shelves full of colourful boxes.
-// This back wall is also The Night Shift's room after closing (it borrows it
-// by id under a night scrim), so the fridge cases and the lit exit sign are
-// drawn as the brightest things on the wall and must stay that way.
 //
 // Paper Cutout style: every prop goes through paper() so it gets the hard
 // offset shadow; rounded corners, no outlines, no gradients. Anything round

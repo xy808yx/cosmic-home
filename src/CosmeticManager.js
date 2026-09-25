@@ -42,6 +42,7 @@ export const PET_COSMETICS = [
   { id: 'acc_dried_mango', slot: 'accessory', name: 'Dried Mango', price: 0, unlock_only: true, color: 0xf2a13a, rarity: 'legendary', desc: 'A sweet playground treat.' },
   { id: 'acc_free_cone', slot: 'accessory', name: 'Free Cone', price: 0, unlock_only: true, color: 0xfff3e0, rarity: 'legendary', desc: 'The one at the end. On the house.' },
   { id: 'acc_noodles', slot: 'accessory', name: 'Night Noodles', price: 0, unlock_only: true, color: 0xf2d98a, rarity: 'legendary', desc: 'What you eat when you are the last one in the shop.' },
+  { id: 'acc_little_dome', slot: 'accessory', name: 'Little Dome', price: 0, unlock_only: true, color: 0xb3b7d0, rarity: 'legendary', desc: 'A tiny silver dome with warm gold lights.' },
 
   // ---- AURAS ----
   { id: 'aura_none',      slot: 'aura', name: 'None',           price: 0,    isDefault: true, color: 0x000000, rarity: 'common' },

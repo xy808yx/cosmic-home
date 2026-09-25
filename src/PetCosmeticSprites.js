@@ -613,7 +613,8 @@ function freeCone() {
 }
 
 // Night Noodles — a cup of instant noodles, lid off, still steaming. The trophy
-// for clearing the hidden Night Shift (W20). Tapered cup so it reads as the
+// for clearing the old hidden Night Shift (W20, retired; the Science Dome took
+// its place). Kids who won it keep it. Tapered cup so it reads as the
 // styrofoam cup rather than the shop's takeout box, and the noodle mound sits
 // proud of the rim so it's legible at pet scale.
 function nightNoodles() {
@@ -638,6 +639,34 @@ function nightNoodles() {
   ], { O, n, c, b, w, l }];
 }
 
+// Little Dome: a tiny silver geodesic ball on its base, the trophy for lighting
+// up the hidden Science Dome (W39). Silver shaded from the top left, a few warm
+// gold lights set out in staggered rows like the real panel corners (single
+// pixels, gold only), on a red collar and a cream base with two lit windows and
+// red trim, the way the real building sits.
+function littleDome() {
+  const h = 0xe4e6f0, s = 0xb3b7d0, m = 0x8c90b4, d = 0x646892, g = 0xffd98a,
+        w = 0xffe9b0, r = 0xe8594a, b = 0xece5d8;
+  return [[
+    '....OOOO....',
+    '..OOhhhsOO..',
+    '.OhhhhsssmO.',
+    '.OhgsssgsmO.',
+    'OhhssssmmmdO',
+    'OhsssgmmmgdO',
+    'OssssmmmmmdO',
+    'OssgmmmgmddO',
+    '.OsmmmmmmdO.',
+    '.OmmmgmmddO.',
+    '..OOmmddOO..',
+    '...OrrrrO...',
+    '.ObbbbbbbbO.',
+    '.ObwbbbbwbO.',
+    '.OrrrrrrrrO.',
+    '.OOOOOOOOOO.'
+  ], { O, h, s, m, d, g, w, r, b }];
+}
+
 // `hat_*` drawer ids are preserved because they're what player saves reference.
 const ACC_DRAWERS = {
   acc_shades: shades,
@@ -645,6 +674,7 @@ const ACC_DRAWERS = {
   acc_dried_mango: driedMango,
   acc_free_cone: freeCone,
   acc_noodles: nightNoodles,
+  acc_little_dome: littleDome,
   hat_strawberry: strawberryHat,
   hat_banana: bananaHat,
   hat_avocado: avocadoHat,

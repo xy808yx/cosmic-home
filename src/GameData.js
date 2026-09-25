@@ -469,15 +469,17 @@ export const WORLDS = [
     discoveredFromCrate: { worldId: 36 },
     kind: 'exploration'
   },
-  // Chapter 3 secret #2, "The Night Shift": the HARD one. The grocery store
-  // (World 31, the first stop of the day) after closing: lights down, nobody
-  // in, the fridge cases and the exit sign the brightest things left, and a
-  // restocking pallet with the labels worn off. So the crates arrive BACKWARDS
-  // (`? × 8 = 56` instead of `7 × 8`) and she has to work out which bin each
-  // one belongs in. Quota 48, the highest in the game (King Coli 40, The
-  // Mountain 44), on the game's longest clock. The room borrows W31's back
-  // wall under a night scrim (ConveyorScene NIGHT_SHIFT.bgWorldId), so it is a
-  // place she already knows, with the lights off.
+  // Chapter 3 secret #2, "The Science Dome": the HARD one. The big silver
+  // dome across the water from The Seawall (World 37), at dusk with its lights
+  // off. Every crate is a puzzle with one factor missing (`? × 8 = 56` instead
+  // of `7 × 8`), and each one solved switches on the next light. Quota 48, the
+  // highest in the game (King Coli 40, The Mountain 44), on the game's longest
+  // clock. When it is won the dome glows warm gold and white, never a rainbow.
+  //
+  // It took over from The Night Shift (the old id 20) under a NEW id, so every
+  // kid gets a fresh secret to find, including the ones who already found the
+  // Night Shift. Id 20 is retired, not deleted: its save keys, its stars (still
+  // in the star total) and its Night Noodles all stay. See RETIRED_WORLD_IDS.
   //
   // `belt: true` routes it to the ConveyorScene rather than GameScene (see
   // usesConveyorScene): it is a gauntlet, but Chapter 3's gauntlet is the belt.
@@ -485,18 +487,18 @@ export const WORLDS = [
   // the tempo, because a panic-fast belt manufactures taps the engine would
   // wrongly certify as automatic (see the floor in ConveyorScene).
   //
-  // No creatures, no villain. Nothing here is chasing her; it is just the store
-  // at night and a stack of work.
+  // No creatures, no villain. Nothing here is chasing her; it is just a dark
+  // dome and a stack of puzzles to light it up.
   {
-    id: 20,
+    id: 39,
     chapter: 3,
-    name: 'The Night Shift',
-    color: 0x2a3550,
-    accentColor: 0x8fd0ff,
-    description: 'The labels wore off. Work out where each one goes.',
+    name: 'The Science Dome',
+    color: 0x4a3a80,        // dusk violet: the sky and the unlit dome
+    accentColor: 0xffd27a,  // warm lamp gold: the lights coming on
+    description: 'Every crate is a puzzle with one number missing. Solve them all and the whole dome lights up.',
     villain: null,
-    flavorText: 'Every crate placed. The floor is quiet and the board is clear.',
-    bossBrief: 'Everyone went home. The last pallet came in with the labels rubbed off, so nothing on a crate says which bin it belongs to. You have the number it makes. Work back from that.',
+    flavorText: 'Every light is on. You can see it from all the way across the water.',
+    bossBrief: 'Dusk at the dome, and its lights are off.\nEach crate is a puzzle with a number missing.\nSolve it to switch on the next light.',
     levelsRequired: 1,
     hidden: true,
     belt: true,
@@ -504,6 +506,13 @@ export const WORLDS = [
     kind: 'gauntlet'
   }
 ];
+
+// Worlds that were taken out of WORLDS but may still live in old saves. Their
+// worldProgress entries are carried through load and save untouched (see
+// mergeWorldProgress), so nothing a kid earned there is lost and the star
+// total keeps adding up. 20 is The Night Shift, replaced by The Science Dome
+// (39). Its discovered and cleared flags stay in the hidden-world seeds.
+export const RETIRED_WORLD_IDS = [20];
 
 // Visible worlds — the main world map S-curve.
 export const VISIBLE_WORLDS = WORLDS.filter(w => !w.hidden);
@@ -619,7 +628,7 @@ export const MODES = {
 // is fine), mirroring getActiveWorlds.
 export function usesConveyorScene(world, levelMode) {
   if (!world) return false;
-  if (world.belt) return true;                      // secret belt gauntlet (The Night Shift)
+  if (world.belt) return true;                      // secret belt gauntlet (The Science Dome)
   if (world.kind === 'sort') return true;            // Ch3 — unchanged, all levels
   if (!progress.conveyorMixedEnabled) return false;  // pilot off → legacy routing
   if (world.hidden) return false;                    // secret gauntlet/exploration worlds stay on GameScene
@@ -777,7 +786,7 @@ export function getBossHpForWorld(worldId) {
   if (worldId === 11) return 48;       // Void Devourer — 4 phases of ~12 hp each.
   if (worldId === 15) return 22;       // Glitch World boss (Datamosh) — mid-game spike.
   if (worldId === 17) return 40;       // King Coli — hidden superboss, just under Patient Zero.
-  if (worldId === 20) return 48;       // The Night Shift — the hardest quota in the game, on backwards facts.
+  if (worldId === 39) return 48;       // The Science Dome: the hardest quota in the game, on backwards facts.
   if (CHAPTER2_BOSS_HP[worldId]) return CHAPTER2_BOSS_HP[worldId];
   if (CHAPTER3_BOSS_HP[worldId]) return CHAPTER3_BOSS_HP[worldId];
   return 8 + worldId * 2;
@@ -791,10 +800,10 @@ export function getBossHpForWorld(worldId) {
 export function getBossDurationForWorld(worldId) {
   if (worldId === 28) return 120;
   if (worldId === 17) return 110;   // King Coli — 40 HP superboss, needs a bigger clock.
-  // The Night Shift — 48 crates of INVERSE facts. Per-crate pace (~2.7s) matches
+  // The Science Dome: 48 crates of INVERSE facts. Per-crate pace (~2.7s) matches
   // King Coli's; the extra length is what makes it the hardest thing in the game,
   // rather than a speed squeeze the belt floor exists to prevent.
-  if (worldId === 20) return 130;
+  if (worldId === 39) return 130;
   return 90;
 }
 
@@ -1113,12 +1122,12 @@ export function getTwistedProblem(worldId, mode) {
   return { ...base, twistKind: 'flare' };
 }
 
-// One INVERSE problem for The Night Shift (W20). The labels wore off the crates,
-// so instead of "7 × 8" telling you the bin, the crate says `? × 8 = 56` and you
-// work backwards to 7.
+// One INVERSE problem for The Science Dome (W39). Each crate is a puzzle with a
+// number missing, so instead of "7 × 8" telling you the bin, the crate says
+// `? × 8 = 56` and you work backwards to 7.
 //
 // Built on top of getProblemForWorld(..., 'boss'), so it inherits the 100%-weak-
-// fact sampling and, critically, the SAME factKey — a Night Shift answer records
+// fact sampling and, critically, the SAME factKey: a Science Dome answer records
 // against the same fact the rest of the game tracks, rather than forking mastery
 // data into a parallel "inverse" pool. Whether the base draw came back as × or ÷
 // is irrelevant: both describe the fact a×b, and this always presents it as the
@@ -1208,10 +1217,12 @@ class PlayerProgress {
         this.endingSeen = !!data.endingSeen;
         this.justClearedWorld = data.justClearedWorld || null;
         // Seed every hidden world id so the shape is complete on load (15/16 Ch1,
-        // 17/18 Ch2, 19/20 Ch3). Absent keys already read false via isHiddenWorld*,
-        // but listing them keeps this the one place the roster is declared.
-        this.hiddenWorldDiscovered = { 15: false, 16: false, 17: false, 18: false, 19: false, 20: false, ...(data.hiddenWorldDiscovered || {}) };
-        this.hiddenWorldCleared = { 15: false, 16: false, 17: false, 18: false, 19: false, 20: false, ...(data.hiddenWorldCleared || {}) };
+        // 17/18 Ch2, 19/39 Ch3). Absent keys already read false via isHiddenWorld*,
+        // but listing them keeps this the one place the roster is declared. 20 is
+        // the retired Night Shift: still seeded so a kid who found or cleared it
+        // keeps those flags. The Science Dome (39) starts undiscovered for everyone.
+        this.hiddenWorldDiscovered = { 15: false, 16: false, 17: false, 18: false, 19: false, 20: false, 39: false, ...(data.hiddenWorldDiscovered || {}) };
+        this.hiddenWorldCleared = { 15: false, 16: false, 17: false, 18: false, 19: false, 20: false, 39: false, ...(data.hiddenWorldCleared || {}) };
         this.arcade = { endlessBest: 0, bossRushBest: null, ...(data.arcade || {}) };
         this.petHelperUsed = !!data.petHelperUsed; // big-boss helper consumed
         this.dadNoteState = { lastClaimDate: null, nextIndex: 0, ...(data.dadNoteState || {}) };
@@ -1275,8 +1286,8 @@ class PlayerProgress {
     this.cosmetics = this.getDefaultCosmetics();
     this.endingSeen = false;
     this.justClearedWorld = null;
-    this.hiddenWorldDiscovered = { 15: false, 16: false, 17: false, 18: false, 19: false, 20: false };
-    this.hiddenWorldCleared = { 15: false, 16: false, 17: false, 18: false, 19: false, 20: false };
+    this.hiddenWorldDiscovered = { 15: false, 16: false, 17: false, 18: false, 19: false, 20: false, 39: false };
+    this.hiddenWorldCleared = { 15: false, 16: false, 17: false, 18: false, 19: false, 20: false, 39: false };
     this.arcade = { endlessBest: 0, bossRushBest: null };
     this.petHelperUsed = false;
     this.dadNoteState = { lastClaimDate: null, nextIndex: 0 };
@@ -1488,6 +1499,14 @@ class PlayerProgress {
           levelMastered
         };
       }
+    }
+    // A retired world (The Night Shift, 20) is no longer in WORLDS, so the loop
+    // above would drop it. Carry its entry through exactly as saved: its stars
+    // are already in totalStars, and a later devClearAllWorlds recount (which
+    // sums every entry) must still find them.
+    for (const id of RETIRED_WORLD_IDS) {
+      const s = saved[id];
+      if (s && typeof s === 'object') defaults[id] = s;
     }
     return defaults;
   }

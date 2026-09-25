@@ -37,10 +37,10 @@ export function createMapAmbience(scene, opts) {
   } else if (chapter === 3) {
     // Home Ground: summer-day air over the family's city, drifting cream and
     // sky-blue motes and slow motes rising in the daylight. No white stars, no
-    // shooting stars.
+    // shooting stars, and no edge vignette: on the light paper its dark bars
+    // read as hard grey stripes, and the paper names carry their own halo.
     for (let i = 0; i < 16; i++) buildDriftMote(scene, state, width, height);
     scheduleWarmMote(scene, state, width, height);
-    buildVignette(scene, width, height);
   } else {
     // Outer Space: the cosmic starfield ambience.
     buildTwinkleStars(scene, state, width, height);
@@ -229,7 +229,7 @@ function scheduleWarmMote(scene, state, W, H) {
 }
 
 // Subtle peripheral vignette (depth 4, between ambience and nodes) so node
-// labels near the screen edges always stay readable.
+// labels near the screen edges always stay readable. Inner Space only.
 function buildVignette(scene, W, H) {
   const v = scene.add.graphics().setDepth(4);
   v.fillStyle(0x000000, 0.18);

@@ -578,14 +578,22 @@ export class ParentDashboardScene extends Phaser.Scene {
     })).setOrigin(0.5, 0);
     this.contentContainer.add(heading);
     y += heading.height + 12;
-    this.contentContainer.add(this.add.text(W / 2, y,
+    const about = this.add.text(W / 2, y,
       'The game adapts to your child automatically: facts they miss resurface more often, and timing scales with the world they\'re in.',
       style('body', {
         fill: '#cfcfe0',
         align: 'center',
         lineSpacing: 8,
         wordWrap: { width: 900, useAdvancedWrap: true }
-      })).setOrigin(0.5, 0));
+      })).setOrigin(0.5, 0);
+    this.contentContainer.add(about);
+    y += about.height + 64;
+
+    // The Chapter 3 city map is traced from OpenStreetMap data, which asks
+    // for this credit. Kept to one quiet line at the label size.
+    this.contentContainer.add(this.add.text(W / 2, y, 'Map data © OpenStreetMap contributors', style('caption', {
+      align: 'center'
+    })).setOrigin(0.5, 0));
   }
 
   addSettingButton(y, label, callback, color = ACCENT) {
