@@ -9,7 +9,7 @@ import { style, TYPE } from '../textStyles.js';
 import { createButton } from '../buttonHelper.js';
 import { createModal } from '../modalHelper.js';
 import { companion, drawCompanion } from '../CompanionManager.js';
-import { anchorXY } from '../PetSprites.js';
+import { anchorXY, PET_SPRITES } from '../PetSprites.js';
 import { cosmetics } from '../CosmeticManager.js';
 import { GARAGE_ITEMS } from '../content/dadGarage.js';
 import { HOTPOT_ITEMS } from '../content/hotPot.js';
@@ -180,7 +180,7 @@ export class HiddenWorldScene extends Phaser.Scene {
       { id: 'stroller', x: 760,    y: 950,  hitW: 280, hitH: 260, draw: drawUppababyVista,label: 'Stroller' },
       { id: 'bikes',    x: 250,    y: 1280, hitW: 360, hitH: 220, draw: drawKidsBikes,    label: "Kids' bikes" },
       { id: 'ebike',    x: 760,    y: 1280, hitW: 360, hitH: 240, draw: drawRadPower,     label: 'Ebike' },
-      { id: 'shoes',    x: W / 2,  y: 1560, hitW: 760, hitH: 200, draw: drawShoeRack,     label: 'Running shoes' }
+      { id: 'shoes',    x: W / 2,  y: 1560, hitW: 600, hitH: 200, draw: drawShoeRack,    label: 'Running shoes' }
     ].map(it => ({ ...it, bubble: bubbleFor(it.id) }));
 
     // Fresh node table every visit: a stale one would hand the pet destroyed
@@ -605,8 +605,8 @@ export class HiddenWorldScene extends Phaser.Scene {
   createGaragePet() {
     // Reset first: these fields outlive the scene, and a stale pet, a busy flag
     // or a queued tap left over from a mid-routine exit would wedge the next visit.
-    this._garagePetContainer = null;
-    this._garagePetSprite = null;
+    this._roomPet = null;
+    this._roomPetSprite = null;
     this._gpBusy = false;
     this._gpQueued = null;
     this._gpRestTimer = null;
@@ -618,9 +618,9 @@ export class HiddenWorldScene extends Phaser.Scene {
     if (!companion.hasStarter()) return;
 
     const pet = this.add.container(540, 0).setDepth(11);
-    this._garagePetContainer = pet;
-    this._garagePetSprite = drawCompanion(this, 0, 0, { scale: 1.1 });
-    pet.add(this._garagePetSprite);
+    this._roomPet = pet;
+    this._roomPetSprite = drawCompanion(this, 0, 0, { scale: 1.1 });
+    pet.add(this._roomPetSprite);
     // Starts on the open floor between the desk row and the bikes.
     pet.y = 1180 - this._gpFoot();
 
@@ -640,24 +640,24 @@ export class HiddenWorldScene extends Phaser.Scene {
   // Glasses from the storage bins) shows up right away instead of next visit.
   // No-op when there's no starter pet (createGaragePet bailed).
   refreshGaragePet() {
-    if (!this._garagePetContainer?.active || !this._garagePetSprite) return;
-    this._garagePetSprite.destroy();
-    this._garagePetSprite = drawCompanion(this, 0, 0, { scale: 1.1 });
+    if (!this._roomPet?.active || !this._roomPetSprite) return;
+    this._roomPetSprite.destroy();
+    this._roomPetSprite = drawCompanion(this, 0, 0, { scale: 1.1 });
     // addAt(…, 0) keeps the pet below the transparent tap hit-rect.
-    this._garagePetContainer.addAt(this._garagePetSprite, 0);
+    this._roomPet.addAt(this._roomPetSprite, 0);
     this._gpFace(this._gpFacing);
   }
 
   // A tap on an object: that object is next. Starts right away if the pet is
   // resting; otherwise it runs as soon as the current routine finishes.
   garagePetInteract(id) {
-    if (!this._garagePetContainer?.active) return;
+    if (!this._roomPet?.active) return;
     this._gpQueued = id;
     if (!this._gpBusy) this._gpNext();
   }
 
   _gpNext() {
-    const pet = this._garagePetContainer;
+    const pet = this._roomPet;
     const id = this._gpQueued;
     if (!pet?.active || this._gpBusy || !id) return;
     this._gpRestTimer?.remove(false);
@@ -686,7 +686,7 @@ export class HiddenWorldScene extends Phaser.Scene {
   // Between taps: stand and look around until a kid taps something. A tap that
   // came in during the last routine runs after a short beat.
   _gpRest() {
-    const pet = this._garagePetContainer;
+    const pet = this._roomPet;
     if (!pet?.active) return;
     if (this._gpHost) this._gpExit();
     this._gpDrop();
@@ -714,8 +714,8 @@ export class HiddenWorldScene extends Phaser.Scene {
   // Distance from the pet's origin down to its feet at a given scale. Sprites
   // differ a lot by species and stage (an egg is ~100px tall, an ember adult
   // ~150px), so every "stand on" / "sit in" spot is worked out from this.
-  _gpFoot(scale = this._garagePetContainer?.scaleY ?? 1) {
-    const layout = this._garagePetSprite?.layout;
+  _gpFoot(scale = this._roomPet?.scaleY ?? 1) {
+    const layout = this._roomPetSprite?.layout;
     return (layout ? layout.height / 2 : 60) * 1.1 * scale;
   }
 
@@ -723,28 +723,28 @@ export class HiddenWorldScene extends Phaser.Scene {
   // up), from the sprite's own head_eye anchor. Tide adults are short and wide
   // with low-set eyes, ember adults tall with high ones, so a fixed fraction of
   // the height hides some pets' eyes below a rim.
-  _gpEyeY(scale = this._garagePetContainer?.scaleY ?? 1) {
-    const spr = this._garagePetSprite;
+  _gpEyeY(scale = this._roomPet?.scaleY ?? 1) {
+    const spr = this._roomPetSprite;
     if (!spr?.layout || !spr.species) return -this._gpFoot(scale) * 0.4;
     return anchorXY(spr.species.id, spr.stage, 'head_eye', spr.layout).y * 1.1 * scale;
   }
 
-  // Origin y that sinks the pet into something (freezer, bin, bassinet, shoe)
+  // Origin y that sinks the pet into something (freezer, bin, stroller seat, shoe)
   // with its eyes just clear of the rim at `rimY`.
   _gpPeek(rimY, scale) {
     return rimY - 20 * scale - this._gpEyeY(scale);
   }
 
   // Half the pet's width at a given scale (for holding things at its side).
-  _gpHalfW(scale = this._garagePetContainer?.scaleX ?? 1) {
-    const layout = this._garagePetSprite?.layout;
+  _gpHalfW(scale = this._roomPet?.scaleX ?? 1) {
+    const layout = this._roomPetSprite?.layout;
     return (layout ? layout.width / 2 : 60) * 1.1 * scale;
   }
 
   // Pet sprites face left by default; mirror the sprite to face right.
   _gpFace(dir) {
     this._gpFacing = dir > 0 ? 1 : -1;
-    const s = this._garagePetSprite;
+    const s = this._roomPetSprite;
     if (s) s.scaleX = Math.abs(s.scaleY) * (this._gpFacing > 0 ? -1 : 1);
   }
 
@@ -755,12 +755,12 @@ export class HiddenWorldScene extends Phaser.Scene {
 
   // Where the pet is in scene coordinates, hosted or not.
   _gpWorld() {
-    const pet = this._garagePetContainer;
+    const pet = this._roomPet;
     return this._gpHost ? this._gpAt(this._gpHost, pet.x, pet.y) : { x: pet.x, y: pet.y };
   }
 
-  // A little heart / letter floating up off the pet's head. Decorative glyphs,
-  // so they keep their own sizes (the napping z's grow 28, 34, 40).
+  // A little heart or '!' floating up off the pet's head. Decorative glyphs,
+  // so they keep their own size.
   _gpEmote(text, color = '#ff9ec7', size = 36) {
     const at = this._gpWorld();
     const t = this.add.text(at.x + 30, at.y - this._gpFoot() - 6, text, style('display', {
@@ -777,7 +777,7 @@ export class HiddenWorldScene extends Phaser.Scene {
   // frame, even when the pet is already there (a second tap on the same
   // object): routines declare their steps after starting the walk.
   _gpWalkTo(x, y, cb) {
-    const pet = this._garagePetContainer;
+    const pet = this._roomPet;
     const sx = pet.x, sy = pet.y;
     const dist = Phaser.Math.Distance.Between(sx, sy, x, y);
     if (dist < 4) { this.time.delayedCall(1, () => cb?.()); return; }
@@ -800,7 +800,7 @@ export class HiddenWorldScene extends Phaser.Scene {
   // orange bike) keeping it where it is on screen. From here on the pet's x/y
   // are in the host's own coordinates, the same ones its art is drawn in.
   _gpEnter(host) {
-    const pet = this._garagePetContainer;
+    const pet = this._roomPet;
     const local = host.getWorldTransformMatrix().applyInverse(pet.x, pet.y);
     host.add(pet);
     pet.setPosition(local.x, local.y);
@@ -814,7 +814,7 @@ export class HiddenWorldScene extends Phaser.Scene {
 
   // Back out into the scene, same spot on screen, off any front piece.
   _gpExit() {
-    const pet = this._garagePetContainer;
+    const pet = this._roomPet;
     const host = this._gpHost;
     if (!host) return;
     const at = this._gpAt(host, pet.x, pet.y);
@@ -836,16 +836,16 @@ export class HiddenWorldScene extends Phaser.Scene {
   // back out on top of everything in the host.
   _gpBehind(front) {
     front.setVisible(true);
-    this._gpHost.moveBelow(this._garagePetContainer, front);
+    this._gpHost.moveBelow(this._roomPet, front);
   }
   _gpInFront() {
-    this._gpHost.bringToTop(this._garagePetContainer);
+    this._gpHost.bringToTop(this._roomPet);
   }
 
   // Tween to (x, y) in whatever space the pet is in.
   _gpTo(x, y, dur, cb, ease = 'Quad.easeInOut') {
     this.tweens.add({
-      targets: this._garagePetContainer, x, y, duration: dur, ease,
+      targets: this._roomPet, x, y, duration: dur, ease,
       onComplete: () => cb?.()
     });
   }
@@ -854,7 +854,7 @@ export class HiddenWorldScene extends Phaser.Scene {
   // `scale` resizes on the way (how it tucks in to fit a seat); `onMid` runs
   // once, just past the peak (used to drop in behind a front piece).
   _gpJump(x, y, h, dur, cb, { scale = null, onMid = null } = {}) {
-    const pet = this._garagePetContainer;
+    const pet = this._roomPet;
     const sx = pet.x, sy = pet.y, s0 = pet.scaleX;
     let mid = false;
     const drv = { p: 0 };
@@ -878,7 +878,7 @@ export class HiddenWorldScene extends Phaser.Scene {
 
   // `n` quick hops in place.
   _gpHop(n, h, cb) {
-    const pet = this._garagePetContainer;
+    const pet = this._roomPet;
     const y0 = pet.y;
     this.tweens.add({
       targets: pet, y: y0 - h, duration: 150, yoyo: true, repeat: n - 1,
@@ -888,7 +888,7 @@ export class HiddenWorldScene extends Phaser.Scene {
 
   // Squash on landing, feet kept planted.
   _gpSquash(cb, amt = 0.16) {
-    const pet = this._garagePetContainer;
+    const pet = this._roomPet;
     const s = pet.scaleY, y0 = pet.y, foot = this._gpFoot(s);
     this.tweens.add({
       targets: pet, scaleX: s * (1 + amt), scaleY: s * (1 - amt), y: y0 + foot * amt,
@@ -899,7 +899,7 @@ export class HiddenWorldScene extends Phaser.Scene {
 
   // A few quick side-to-side jitters (a shiver, a scrabble, a dig).
   _gpJitter(n, dx, cb, dAngle = 0) {
-    const pet = this._garagePetContainer;
+    const pet = this._roomPet;
     const x0 = pet.x;
     this.tweens.add({
       targets: pet, x: x0 + dx, angle: dAngle, duration: 45, yoyo: true, repeat: n - 1,
@@ -954,7 +954,7 @@ export class HiddenWorldScene extends Phaser.Scene {
     const node = this._garageNode?.freezer;
     const parts = node?.gParts;
     if (!parts) { done(); return; }
-    const pet = this._garagePetContainer;
+    const pet = this._roomPet;
     const S = 0.78;
     const f = this._gpFoot(S);
     const lift = { x: 40, y: 90 - this._gpFoot(1) };
@@ -1013,7 +1013,7 @@ export class HiddenWorldScene extends Phaser.Scene {
     const node = this._garageNode?.freezer;
     const parts = node?.gParts;
     if (!parts) { done(); return; }
-    const pet = this._garagePetContainer;
+    const pet = this._roomPet;
     const S = 0.9;
     const stand = { x: 160, y: 90 - this._gpFoot(1) };
     const perch = { x: 6, y: -64 - this._gpFoot(S) };
@@ -1056,7 +1056,7 @@ export class HiddenWorldScene extends Phaser.Scene {
     const node = this._garageNode?.rack;
     const parts = node?.gParts;
     if (!parts) { done(); return; }
-    const pet = this._garagePetContainer;
+    const pet = this._roomPet;
     const S = 0.78;
     const f = this._gpFoot(S);
     const stand = { x: 60, y: 150 - this._gpFoot(1) };
@@ -1109,7 +1109,7 @@ export class HiddenWorldScene extends Phaser.Scene {
     const node = this._garageNode?.bins;
     const parts = node?.gParts;
     if (!parts) { done(); return; }
-    const pet = this._garagePetContainer;
+    const pet = this._roomPet;
     const S = 0.72;
     const f = this._gpFoot(S);
     const stand = { x: 160, y: 100 - this._gpFoot(1) };
@@ -1185,7 +1185,7 @@ export class HiddenWorldScene extends Phaser.Scene {
     const node = this._garageNode?.squat;
     const parts = node?.gParts;
     if (!parts) { done(); return; }
-    const pet = this._garagePetContainer;
+    const pet = this._roomPet;
     const S = 0.82;
     const f = this._gpFoot(S);
     const stand = { x: 0, y: 136 - this._gpFoot(1) };
@@ -1244,7 +1244,7 @@ export class HiddenWorldScene extends Phaser.Scene {
     const node = this._garageNode?.laptop;
     const parts = node?.gParts;
     if (!parts) { done(); return; }
-    const pet = this._garagePetContainer;
+    const pet = this._roomPet;
     // Left of the laptop, but never off the left edge of the screen (x 215).
     const seat = { x: Math.max(-150, this._gpHalfW(1) - 205), y: 80 - this._gpFoot(1) };
     const colors = [0x7ee787, 0x79c0ff, 0xffa657, 0xd2a8ff];
@@ -1310,7 +1310,7 @@ export class HiddenWorldScene extends Phaser.Scene {
     const node = this._garageNode?.printer;
     const parts = node?.gParts;
     if (!parts) { done(); return; }
-    const pet = this._garagePetContainer;
+    const pet = this._roomPet;
     const S = 0.8;
     const stand = { x: -140, y: 95 - this._gpFoot(1) };
     const perch = { x: 4, y: -84 - this._gpFoot(S) };
@@ -1385,63 +1385,64 @@ export class HiddenWorldScene extends Phaser.Scene {
     });
   }
 
-  // Stroller (760,950): try to climb into the bassinet. The first go bonks off
-  // the side, the second gets its paws over the rim and slips back, the third
-  // makes it: it snuggles down under the hood and rocks along with the stroller.
+  // Stroller (760,950): try to climb into the toddler seat. The first go bonks
+  // off the seat front, the second gets its paws over the bumper bar and slips
+  // back, the third makes it: it sits up behind the bar looking out the open
+  // front, and the stroller takes it for a little roll forward and back. Then
+  // it hops out.
   gpStrollerClimb(done) {
     const node = this._garageNode?.stroller;
     const parts = node?.gParts;
     if (!parts) { done(); return; }
-    const pet = this._garagePetContainer;
+    const pet = this._roomPet;
+    const R = STROLLER;
     const S0 = 0.8, S = 0.6;
     const stand = { x: 180, y: 120 - this._gpFoot(1) };
-    const low = { x: 132, y: 120 - this._gpFoot(S0) };
-    const bonk = { x: 88, y: -26 - this._gpFoot(S0) * 0.2 };
-    const rim = { x: 70, y: -54 - this._gpFoot(S0) * 0.55 };
-    const inside = { x: 26, y: this._gpPeek(-54, S) };
+    const low = { x: 140, y: 120 - this._gpFoot(S0) };
+    const bonk = { x: R.seatFrontX + 8 + this._gpHalfW(S0) * 0.7, y: -4 - this._gpFoot(S0) * 0.2 };
+    const rim = { x: R.seatFrontX + this._gpHalfW(S0) * 0.5, y: R.barY - this._gpFoot(S0) * 0.55 };
+    // On the cushion; a small pet sits up higher so its eyes still clear the bar.
+    const seat = { x: -48, y: Math.min(R.seatY - this._gpFoot(S), this._gpPeek(R.barY, S)) };
     const slide = (cb) => this.tweens.add({
       targets: pet, x: low.x, y: low.y, angle: 10, duration: 380, ease: 'Quad.easeIn',
       onComplete: () => { pet.angle = 0; this._gpSquash(() => this._gpJitter(2, 5, cb, -8)); }
     });
+    // Hold still while it climbs; the idle push comes back once it's out.
+    parts.pause();
     const at = this._gpAt(node, stand.x, stand.y);
     this._gpWalkTo(at.x, at.y, () => {
       this._gpEnter(node);
       this._gpFace(-1);
       this._gpJump(bonk.x, bonk.y, 40, 380, () => slide(() => {
         this._gpJump(rim.x, rim.y, 80, 440, () => this._gpJitter(6, 4, () => slide(() => {
-          this._gpJump(inside.x, inside.y, 130, 560, () => this._gpSquash(() => {
-            // Face out the open front, eyes away from the hood.
+          this._gpJump(seat.x, seat.y, 130, 560, () => this._gpSquash(() => {
+            // Face out the open front, away from the canopy.
             this._gpFace(1);
-            this._gpSnooze(3, () => {
-              this._gpInFront();
-              parts.front.setVisible(false);
-              this._gpJump(stand.x, stand.y, 90, 520, () => { this._gpExit(); done(); }, { scale: 1 });
-            });
+            ride();
           }), { scale: S, onMid: () => this._gpBehind(parts.front) });
         }), 6));
       }), { scale: S0 });
     });
-  }
-
-  // Settle in for a nap: slow breaths and a few z's drifting up.
-  _gpSnooze(n, cb) {
-    const pet = this._garagePetContainer;
-    const s = pet.scaleY, y0 = pet.y;
-    let k = 0;
-    const breathe = () => {
-      this._gpEmote('z', '#cfe3ff', 28 + k * 6);
-      this.tweens.add({
-        targets: pet, scaleY: s * 0.92, y: y0 + this._gpFoot(s) * 0.08,
-        duration: 420, yoyo: true, ease: 'Sine.easeInOut',
-        onComplete: () => {
-          pet.setScale(s);
-          pet.y = y0;
-          if (++k < n) breathe();
-          else cb?.();
-        }
-      });
-    };
-    breathe();
+    // Lean back as it sets off, forward as it stops.
+    const lean = (a) => this.tweens.add({
+      targets: pet, angle: a, duration: 300, yoyo: true, ease: 'Sine.easeOut'
+    });
+    const ride = () => this._gpHop(2, 10, () => {
+      this._gpEmote('♥');
+      lean(-7);
+      parts.roll(28, 900, () => this.time.delayedCall(200, () => {
+        lean(7);
+        parts.roll(-16, 1100, () => parts.roll(0, 700, () => this.time.delayedCall(250, () => {
+          this._gpInFront();
+          parts.front.setVisible(false);
+          this._gpJump(stand.x, stand.y, 90, 520, () => {
+            this._gpExit();
+            parts.resume();
+            done();
+          }, { scale: 1 });
+        })));
+      }));
+    });
   }
 
   // Kids' bikes (250,1280): climb onto the orange bike, wobble forward like a
@@ -1450,7 +1451,7 @@ export class HiddenWorldScene extends Phaser.Scene {
     const node = this._garageNode?.bikes;
     const parts = node?.gParts;
     if (!parts) { done(); return; }
-    const pet = this._garagePetContainer;
+    const pet = this._roomPet;
     const bike = parts.bike;
     const S = 0.58;
     const f = this._gpFoot(S);
@@ -1499,7 +1500,7 @@ export class HiddenWorldScene extends Phaser.Scene {
     const node = this._garageNode?.ebike;
     const parts = node?.gParts;
     if (!parts) { done(); return; }
-    const pet = this._garagePetContainer;
+    const pet = this._roomPet;
     const S = 0.62;
     const stand = { x: -215, y: 100 - this._gpFoot(1) };
     const seat = { x: -104, y: -38 - this._gpFoot(S) };     // bottom tucked into the cushion
@@ -1538,61 +1539,226 @@ export class HiddenWorldScene extends Phaser.Scene {
     });
   }
 
-  // Running shoes (540,1560): hop into the teal runner, which hops off the rack
-  // and zooms across the floor and back, kicking up dust, then hops home.
+  // Running shoes (540,1560): hop into Dad's near racer and drive it like a go
+  // kart. It revs on the rack with little puffs out of the heel, drops to the
+  // floor in a wheelie, scoots out along the floor past the rack's end, skids
+  // round, comes back along a far lane above the rack (a touch smaller, further
+  // off), skids round again, runs back along the far lane and swings down into
+  // its own spot with a skid-stop. Its partner stays on the rack.
   gpShoeZoom(done) {
     const node = this._garageNode?.shoes;
     const parts = node?.gParts;
     if (!parts) { done(); return; }
+    const pet = this._roomPet;
     const shoe = parts.shoe;
-    const S = 0.55;
-    const f = this._gpFoot(S);
-    const standN = { x: -40, y: 150 - this._gpFoot(1) };   // node space, floor below the rack
-    const inShoe = { x: -14, y: this._gpPeek(-32, S) };      // shoe space, down in the opening
-    const floorY = 110;                                      // node space: open floor under the rack
+    const L = parts.len;
+    const home = parts.home;
+    // 0.5, not smaller: the shoe is only about 40 pt long on a phone, and a
+    // smaller pet peeking from the collar was a few px of face.
+    const S = 0.5;
+    // Node space: the floor in front of Dad's pair, clear of the label's end.
+    const standN = { x: home.x + 40, y: 150 - this._gpFoot(1) };
+    // Shoe space: sitting down in the collar with its feet on the insole, so
+    // the head and shoulders ride above the rim (about 0.3 x len up). A small
+    // pet sits up higher so its eyes still clear the rim.
+    const inShoe = { x: -0.24 * L, y: Math.min(-3 - this._gpFoot(S), this._gpPeek(-0.3 * L, S)) };
+    // The lap, in node space: the near lane is the open floor under Dad's end
+    // of the rack, right of the label; the far lane runs above the rack, under
+    // the bikes' and the ebike's labels. It never runs back along the rack's
+    // front, where the pet's head would cross the kids' pairs. The ends sit
+    // clear of the room's edges with the skid's drift and the pet's width included.
+    const nearY = 96, farY = -30, FAR = 0.9;
+    const ends = { right: 360, left: -380 };
     const at = this._gpAt(node, standN.x, standN.y);
     this._gpWalkTo(at.x, at.y, () => {
       this._gpEnter(shoe);
       this._gpFace(1);
-      this._gpJump(inShoe.x, inShoe.y, 70, 460, () => this._gpSquash(go),
+      this._gpJump(inShoe.x, inShoe.y, 60, 440, () => this._gpSquash(rev),
         { scale: S, onMid: () => this._gpBehind(parts.body) });
     });
-    const hop = (toY, cb) => {
-      const y0 = shoe.y;
-      const drv = { p: 0 };
-      this.tweens.add({
-        targets: drv, p: 1, duration: 360, ease: 'Linear',
-        onUpdate: () => { shoe.y = y0 + (toY - y0) * drv.p - Math.sin(drv.p * Math.PI) * 40; },
-        onComplete: () => { shoe.y = toY; cb?.(); }
-      });
+
+    // The kart: where it is, which way the toe points (face runs -1..1 through
+    // a skid's flip), its size, how far it leans nose-up and how far it has
+    // gone (for the scoot bump). place() puts the shoe there.
+    const k = { x: home.x, y: home.y, face: 1, sz: 1, lean: 0, tilt: 0, odo: 0, bump: 0 };
+    const place = () => {
+      const dir = k.face < 0 ? -1 : 1;
+      // Nose-up is a turn toward the toe's side; lift by the dip of the low end
+      // so a wheelie pivots on the heel instead of sinking it into the floor.
+      const a = -dir * k.lean + k.tilt;
+      shoe.angle = a;
+      shoe.x = k.x;
+      shoe.y = k.y - Math.abs(Math.sin(Phaser.Math.DegToRad(a))) * 0.5 * L * k.sz
+        - Math.abs(Math.sin(k.odo * 0.07)) * k.bump * k.sz;
+      shoe.scaleX = k.face * k.sz;
+      shoe.scaleY = k.sz;
+      // The rider rocks back as it speeds up and forward as it brakes, and
+      // keeps most of its width through a skid's flip so its face never thins
+      // to a sliver.
+      pet.angle = -k.lean * 0.5;
+      pet.scaleX = S * Math.max(1, 0.6 / Math.max(Math.abs(k.face), 0.02));
     };
-    const zoom = (toX, dur, cb) => {
-      const dust = this.time.addEvent({
-        delay: 70, loop: true,
-        callback: () => {
-          const h = this._gpAt(shoe, -80, 22);             // the heel, whichever way it faces
-          this._gpPuffs(h.x, h.y, 0xbdb6c4, 2, 16, 18);
-        }
-      });
-      this.tweens.add({
-        targets: shoe, x: toX, duration: dur, ease: 'Sine.easeInOut',
-        onComplete: () => { dust.remove(false); cb?.(); }
-      });
+    const moveTo = (x, y) => {
+      k.odo += Math.hypot(x - k.x, y - k.y);
+      k.x = x; k.y = y;
     };
-    const turn = (cb) => this.tweens.add({
-      targets: shoe, scaleX: -shoe.scaleX, duration: 160, ease: 'Sine.easeInOut', onComplete: cb
-    });
-    const go = () => this.tweens.add({
-      targets: shoe, angle: { from: -6, to: 6 }, duration: 110, yoyo: true, repeat: 1,
-      onComplete: () => {
-        shoe.angle = 0;
-        hop(floorY, () => zoom(360, 560, () => turn(() => zoom(-360, 900, () => turn(() =>
-          zoom(0, 560, () => hop(parts.home.y, () => {
-            this._gpInFront();
-            this._gpJump(standN.x - shoe.x, standN.y - shoe.y, 70, 460, () => { this._gpExit(); done(); }, { scale: 1 });
-          })))))));
+    // Dust off the heel, whichever way it faces, while it's rolling.
+    const heel = (dy = -2) => this._gpAt(shoe, -0.5 * L, dy);
+    let lastOdo = 0;
+    const dust = () => this.time.addEvent({
+      delay: 70, loop: true,
+      callback: () => {
+        if (k.odo - lastOdo < 3) return;
+        lastOdo = k.odo;
+        const h = heel();
+        this._gpPuffs(h.x, h.y, 0xbdb6c4, 2, 12, 14);
       }
     });
+    let dustTimer = null;
+
+    // Straight along a lane: speed up then brake, leaning into both.
+    const drive = (toX, toY, dur, lean, cb) => {
+      const x0 = k.x, y0 = k.y, l0 = k.lean;
+      const drv = { p: 0 };
+      this.tweens.add({
+        targets: drv, p: 1, duration: dur, ease: 'Sine.easeInOut',
+        onUpdate: () => {
+          const p = drv.p;
+          moveTo(x0 + (toX - x0) * p, y0 + (toY - y0) * p);
+          k.lean = l0 * (1 - p) * (1 - p) + lean * Math.sin(p * Math.PI * 2);
+          place();
+        },
+        onComplete: () => { moveTo(toX, toY); k.lean = 0; place(); cb?.(); }
+      });
+    };
+    // Skid round at a lane's end: the back slides out past the end, the toe
+    // swings round (a quick flip), it tips as it goes and throws up dust, and
+    // it comes out on the other lane at that lane's size.
+    const skid = (toY, toSz, cb) => {
+      const x0 = k.x, y0 = k.y, s0 = k.sz, dir = k.face < 0 ? -1 : 1;
+      const drv = { p: 0 };
+      let burst = false;
+      this.tweens.add({
+        targets: drv, p: 1, duration: 520, ease: 'Linear',
+        onUpdate: () => {
+          const p = drv.p;
+          const e = Phaser.Math.Easing.Sine.InOut(p);
+          moveTo(x0 + dir * 26 * Math.sin(p * Math.PI), y0 + (toY - y0) * e);
+          k.sz = s0 + (toSz - s0) * e;
+          k.face = dir * Math.cos(Math.PI * Phaser.Math.Clamp((p - 0.3) / 0.25, 0, 1));
+          k.lean = -5 * Math.sin(p * Math.PI * 2);
+          k.tilt = dir * 7 * Math.sin(p * Math.PI);
+          if (!burst && p >= 0.3) {
+            burst = true;
+            const h = heel();
+            this._gpPuffs(h.x, h.y, 0xbdb6c4, 7, 60, 26);
+          }
+          place();
+        },
+        onComplete: () => {
+          k.x = x0; k.y = toY; k.sz = toSz; k.face = -dir; k.lean = 0; k.tilt = 0;
+          place();
+          cb?.();
+        }
+      });
+    };
+
+    // REV: a shake on the rack with a few puffs out of the heel, the rider bouncing.
+    const rev = () => {
+      const py = pet.y;
+      const drv = { p: 0 };
+      [0, 170, 340].forEach(ms => this.time.delayedCall(ms, () => {
+        const h = heel(-0.08 * L);
+        this._gpPuffs(h.x - 6, h.y, 0x9a94a6, 2, 8, 18);
+      }));
+      this.tweens.add({
+        targets: drv, p: 1, duration: 500, ease: 'Linear',
+        onUpdate: () => {
+          const shake = Math.sin(drv.p * Math.PI * 12);
+          shoe.x = home.x + shake * 2;
+          shoe.angle = shake * 2;
+          pet.y = py - Math.abs(Math.sin(drv.p * Math.PI * 3)) * 6;
+        },
+        onComplete: () => { pet.y = py; place(); launch(); }
+      });
+    };
+    // LAUNCH: off the front of the rack onto the floor, landing in a wheelie.
+    const launch = () => {
+      const x0 = k.x, y0 = k.y, x1 = home.x + 24;
+      const drv = { p: 0 };
+      this.tweens.add({
+        targets: drv, p: 1, duration: 300, ease: 'Linear',
+        onUpdate: () => {
+          const p = drv.p;
+          k.x = x0 + (x1 - x0) * p;
+          k.y = y0 + (nearY - y0) * p - Math.sin(p * Math.PI) * 20;
+          k.lean = 8 * p;
+          place();
+        },
+        onComplete: () => {
+          k.x = x1; k.y = nearY;
+          const h = heel();
+          this._gpPuffs(h.x, h.y, 0xbdb6c4, 4, 30, 18);
+          k.bump = 2.5;
+          dustTimer = dust();
+          lap();
+        }
+      });
+    };
+    // LAP: out, skid, back along the far lane, skid, then home.
+    const lap = () => drive(ends.right, nearY, 520, 5, () =>
+      skid(farY, FAR, () => drive(ends.left, farY, 1100, 6, () =>
+        skid(farY, FAR, homeRun))));
+    // HOME: back along the far lane, then swing down into its own spot on the
+    // rack, braking nose-down. The drop starts past the kids' pairs, so it
+    // never sits over them.
+    const homeRun = () => {
+      const x0 = k.x, y0 = k.y;
+      const drv = { p: 0 };
+      this.tweens.add({
+        targets: drv, p: 1, duration: 1350, ease: 'Linear',
+        onUpdate: () => {
+          const p = drv.p;
+          const e = Phaser.Math.Easing.Sine.InOut(p);
+          const w = Phaser.Math.Easing.Sine.InOut(Phaser.Math.Clamp((e - 0.84) / 0.16, 0, 1));
+          moveTo(x0 + (home.x - x0) * e, y0 + (home.y - y0) * w);
+          k.sz = FAR + (1 - FAR) * w;
+          k.lean = 6 * Math.sin(p * Math.PI * 2);
+          place();
+        },
+        onComplete: () => { moveTo(home.x, home.y); k.sz = 1; k.lean = 0; place(); park(); }
+      });
+    };
+    // PARK: a skid-stop (the heel kicks out, a puff of dust), a settle bounce,
+    // then the rider hops out onto the floor.
+    const park = () => {
+      dustTimer?.remove(false);
+      k.bump = 0;
+      const h = heel();
+      this._gpPuffs(h.x, h.y, 0xbdb6c4, 5, 40, 20);
+      const drv = { p: 0 };
+      this.tweens.add({
+        targets: drv, p: 1, duration: 260, ease: 'Linear',
+        onUpdate: () => {
+          const q = Math.sin(drv.p * Math.PI);
+          k.tilt = -4 * q * (1 - drv.p);
+          place();
+          // Settle: a squash into the shelf, feet kept planted.
+          shoe.scaleY = 1 - 0.08 * q;
+          shoe.scaleX = 1 + 0.05 * q;
+        },
+        onComplete: () => {
+          shoe.setPosition(home.x, home.y);
+          shoe.setAngle(0);
+          shoe.setScale(1);
+          pet.angle = 0;
+          pet.scaleX = S;
+          this._gpEmote('♥');
+          this._gpInFront();
+          this._gpJump(standN.x - shoe.x, standN.y - shoe.y, 60, 440, () => { this._gpExit(); done(); }, { scale: 1 });
+        }
+      });
+    };
   }
 
   // A red, white and blue ice pop in three bites (top, middle, bottom) on a
@@ -1655,7 +1821,7 @@ export class HiddenWorldScene extends Phaser.Scene {
       case 'bikes':    return this._bikesOrange(node);
       case 'ebike':    return this._ebikeCharging(node);
       case 'squat':    return this._squatRackReps(node);
-      case 'shoes':    return this._shoesTeal(node);
+      case 'shoes':    return this._shoesDad(node);
     }
   }
 
@@ -1847,13 +2013,40 @@ export class HiddenWorldScene extends Phaser.Scene {
     node.gParts = { code };
   }
 
-  // Stroller: a gentle rock, like soothing a baby. (Pivots near the wheels.)
+  // Stroller: a gentle push back and forth, like soothing a baby. The whole
+  // node rolls a few px and each wheel (its own piece) turns to match, so the
+  // tyres roll on the floor instead of sliding.
+  //
+  // roll(dx, dur) moves it to `dx` from its spot for the pet's ride; pause()
+  // parks the idle push first, resume() starts it again from the spot.
   _strollerRock(node) {
-    this.tweens.add({
-      targets: node, angle: { from: -2.4, to: 2.4 },
-      duration: 1700, yoyo: true, repeat: -1, ease: 'Sine.easeInOut'
+    const homeX = node.x;
+    const wheels = [STROLLER.rear, STROLLER.front].map(({ x, y, r }) => {
+      const w = this.add.graphics();
+      drawStrollerWheel(w, r);
+      w.setPosition(x, y);
+      node.add(w);
+      return { w, r };
     });
-    node.gParts = { front: this._garageFront(node, drawStrollerBassinet) };
+    const spin = () => wheels.forEach(({ w, r }) => { w.rotation = (node.x - homeX) / r; });
+    const front = this._garageFront(node, drawStrollerSeatFront);
+    let idle = null;
+    const push = () => {
+      idle = this.tweens.addCounter({
+        from: 0, to: Math.PI * 2, duration: 3400, repeat: -1,
+        onUpdate: t => { node.x = homeX + Math.sin(t.getValue()) * 5; spin(); }
+      });
+    };
+    node.gParts = {
+      front,
+      pause: () => { idle?.stop(); idle = null; },
+      resume: () => { if (!idle && node.active) push(); },
+      roll: (dx, dur, cb) => this.tweens.add({
+        targets: node, x: homeX + dx, duration: dur, ease: 'Sine.easeInOut',
+        onUpdate: spin, onComplete: () => cb?.()
+      })
+    };
+    push();
   }
 
   // Kids' bikes: the orange middle bike as its own piece so the pet can ride
@@ -1933,15 +2126,17 @@ export class HiddenWorldScene extends Phaser.Scene {
     };
   }
 
-  // Shoe rack: the teal middle runner as its own piece so the pet can ride it.
-  _shoesTeal(node) {
-    const home = { x: 0, y: 14 };
+  // Shoe rack: Dad's near racer as its own piece so the pet can ride it. Its
+  // origin is the ground under the middle of the sole.
+  _shoesDad(node) {
+    const dad = SHOE_PAIRS.find(p => p.pal === DAD_SHOE);
+    const home = { x: dad.x, y: SHOE_SHELF_Y };
     const shoe = this.add.container(home.x, home.y);
     const sg = this.add.graphics();
-    drawCuteShoe(sg, 0, 0, 0xfff5e6, 0x4ecdc4);
+    drawRacerShoe(sg, 0, 0, dad.len, DAD_SHOE);
     shoe.add(sg);
     node.add(shoe);
-    node.gParts = { shoe, body: sg, home };
+    node.gParts = { shoe, body: sg, home, len: dad.len };
   }
 
   // ============================================================
@@ -1959,80 +2154,109 @@ export class HiddenWorldScene extends Phaser.Scene {
       strokeThickness: 6
     })).setOrigin(0.5).setDepth(5);
 
-    // Companion pet standing on the woodchips, kept for the monkey-bar swing.
-    this.createRecessPet();
-
-    // Bubble copy lives inline — short, warm, kid-friendly.
-    // Roomy 3-row layout across the woodchips; the running track is a separate
-    // full-width band along the very bottom (added after this loop).
+    // Bubble copy lives inline: short, warm, kid-friendly.
+    //
+    // Every stop comes from this one table, the field and the running track
+    // included, so every label is placed the same way: it hangs just under the
+    // stop's ground line (`ground`, in scene y). A drawn stop's node sits
+    // `foot` above its ground line (where its renderer puts the posts' feet and
+    // the shadow), and the stops in a row share one ground line, so their
+    // labels line up. `art` is the box a stop's renderer draws in, in its
+    // node's coordinates (posts, roof, shadow), for its tap box. The field and
+    // the track are painted into the backdrop: no renderer, `area` is the band
+    // of the backdrop they cover (scene y, full width), `bubbleY` where their
+    // bubble pops, and `ground` is just the line their label hangs from.
+    const R = PG_GROUND;
     const items = [
+      { id: 'field',   x: W / 2, ground: 582, area: [470, 632], bubbleY: 551, label: 'Field',
+        bubble: 'Catch me if you can!' },
       // labelDx: the slide's ladder stands inside the tower's right edge, so the
       // tower's label sits a little left of center to clear it.
-      { id: 'tower',   x: 250,  y: 900,  hitW: 320, hitH: 420, draw: drawPlayStructure, label: 'Play tower',
-        labelDx: -20, bubble: "You can't catch me!" },
-      { id: 'slide',   x: 470,  y: 980,  hitW: 270, hitH: 400, draw: drawWavySlide,     label: 'Big slide',
-        bubble: 'Cheeeeoooh!' },
-      { id: 'bars',    x: 840,  y: 920,  hitW: 360, hitH: 360, draw: drawMonkeyBars,    label: 'Monkey bars',
+      { id: 'tower',   x: 250,   ground: R.row1, foot: 200, art: [-125, -210, 124, 214], draw: drawPlayStructure, label: 'Play tower',
+        labelDx: -20, bubble: 'The floor is lava!' },
+      // The slide's art box starts at its ladder: the top platform's lip pokes
+      // 8px further left, over the tower's side, and counts as the tower's.
+      { id: 'slide',   x: 470,   ground: R.row1, foot: 188, art: [-118, -210, 134, 200], draw: drawWavySlide,     label: 'Big slide',
+        labelDx: 10, bubble: 'Cheeeeoooh!' },
+      { id: 'bars',    x: 840,   ground: R.row1, foot: 172, art: [-161, -155, 160, 185], draw: drawMonkeyBars,    label: 'Monkey bars',
         bubble: 'Slow is smooth, smooth is fast.' },
-      { id: 'wall',    x: 160,  y: 1330, hitW: 220, hitH: 280, draw: drawClimbingWall,  label: 'Climbing wall',
+      { id: 'wall',    x: 160,   ground: R.row2, foot: 142, art: [-93, -131, 92, 153],   draw: drawClimbingWall,  label: 'Climbing wall',
         bubble: 'Watch your step!' },
-      { id: 'zipline', x: 490,  y: 1330, hitW: 280, hitH: 240, draw: drawZipLine,       label: 'Zip line',
+      { id: 'zipline', x: 490,   ground: R.row2, foot: 110, art: [-129, -119, 128, 121], draw: drawZipLineFrame,  label: 'Zip line',
         bubble: 'Yeeehawww!' },
-      { id: 'tire',    x: 850,  y: 1330, hitW: 250, hitH: 380, draw: drawTireSwing,     label: 'Tire swing',
+      { id: 'tire',    x: 850,   ground: R.row2, foot: 182, art: [-112, -159, 110, 194], draw: drawTireSwingFrame, label: 'Tire swing',
         bubble: 'Hold on tight!!' },
-      { id: 'spinner', x: 230,  y: 1580, hitW: 170, hitH: 200, draw: drawSpinnerSeat,   label: 'Spinner',
-        bubble: 'Dizzy!' }
+      // Its label shares a row with the "Dad's notes" board's, which
+      // createNotesBoard hangs 8px under that board's own ground line.
+      { id: 'spinner', x: 230,   ground: R.row3, foot: 95,  art: [-61, -44, 60, 103],    draw: drawSpinnerPost,   label: 'Spinner',
+        bubble: 'Dizzy!' },
+      // Label in the second lane, so it clears "Dad's notes" on the track's edge.
+      { id: 'track',   x: W / 2, ground: PG_TRACK_TOP + 42, area: [PG_TRACK_TOP - 14, H], bubbleY: (PG_TRACK_TOP + H) / 2,
+        label: 'Running track', ink: ['#f4f8ff', '#173a63'], bubble: 'Super fast!' }
     ];
-    // (The soccer goal now lives on the turf field at the top, not the woodchips;
-    //  the bottom row pairs the spinner with Dad's notes board.)
 
+    // Fresh table every visit: a stale one would hand the pet destroyed nodes
+    // from the last time the room was built.
+    this._pgItems = {};
+    const stops = [];
     for (const item of items) {
-      const node = this.add.container(item.x, item.y).setDepth(8);
-      const g = this.add.graphics();
-      item.draw(g);
-      node.add(g);
-      // Stash each node so the spinner tap can rotate its own disc.
-      this['_recessNode_' + item.id] = node;
-      this.tweens.add({
-        targets: node,
-        scale: { from: 1, to: 1.03 },
-        duration: 1500 + Math.random() * 500,
-        yoyo: true,
-        repeat: -1,
-        ease: 'Sine.easeInOut'
-      });
+      let node = null;
+      if (item.draw) {
+        node = this.add.container(item.x, item.ground - item.foot).setDepth(8);
+        const g = this.add.graphics();
+        item.draw(g);
+        node.add(g);
+        // The moving parts the pet plays with (the tire on its chains, the zip
+        // trolley, the spinner's disc, front rails to tuck in behind).
+        this._pgRig(item.id, node);
+        this.tweens.add({
+          targets: node,
+          scale: { from: 1, to: 1.03 },
+          duration: 1500 + Math.random() * 500,
+          yoyo: true,
+          repeat: -1,
+          ease: 'Sine.easeInOut'
+        });
+      }
 
-      addRoomLabel(this, item.x + (item.labelDx || 0), item.y + item.hitH / 2 + 14, item.label, '#ffffff', '#1a3a18');
+      const [fill, stroke] = item.ink || ['#ffffff', '#1a3a18'];
+      const label = addRoomLabel(this, item.x + (item.labelDx || 0), item.ground + PG_LABEL_DROP, item.label, fill, stroke);
 
-      const hit = this.add.rectangle(item.x, item.y, item.hitW, item.hitH, 0, 0)
+      // The art's box in scene coordinates, at the top of its breathing.
+      const art = node
+        ? [0, 1, 2, 3].map(i => (i % 2 ? node.y : node.x) + item.art[i] * PG_BREATHE)
+        : [0, item.area[0], W, item.area[1]];
+      const bubbleY = item.bubbleY ?? node.y;
+      const hit = this.add.rectangle(item.x, bubbleY, 1, 1, 0, 0)
         .setInteractive({ useHandCursor: true }).setDepth(9);
+      this._pgItems[item.id] = { node, hit, label };
+      stops.push({ id: item.id, hit, label, art, pad: node ? PG_HIT_PAD : 0 });
 
       hit.on('pointerdown', () => {
         audio.playClick?.();
-        // The bars run their own unlock messaging; everyone else gets a bubble.
-        if (item.id !== 'bars') this.showBubble(item.x, item.y, item.bubble);
+        // The monkey bars are the secret: until they're crossed the first
+        // time, the found-it card is their message, not a bubble.
+        if (item.id !== 'bars' || progress.isHiddenWorldCleared(18)) {
+          this.showBubble(item.x, bubbleY, item.bubble);
+        }
         this.petInteract(item.id);
       });
     }
 
     // Dad's notes board on the woodchips, same daily mechanic as the garage
-    // whiteboard (its own list + its own once-per-day stardust). Sits low enough
-    // that it never overlaps the "Zip line" label in the row above.
-    this.createNotesBoard(560, 1600, { boardKey: 'playground' });
-
-    // The running track spans the entire bottom of the screen (drawn in the
-    // backdrop). One full-width hit zone lets the pet dash a lap.
-    const trackTop = H - 178;
-    // Second lane, so the full-size label clears "Dad's notes" standing on the
-    // track's edge above it.
-    addRoomLabel(this, W / 2, trackTop + 66, 'Running track', '#f4f8ff', '#173a63').setDepth(9);
-    const trackHit = this.add.rectangle(W / 2, (trackTop + H) / 2, W, H - trackTop, 0, 0)
-      .setInteractive({ useHandCursor: true }).setDepth(9);
-    trackHit.on('pointerdown', () => {
-      audio.playClick?.();
-      this.showBubble(W / 2, trackTop + 40, 'Super fast!');
-      this.petRunTrack();
+    // whiteboard (its own list + its own once-per-day stardust). Its top clears
+    // the "Zip line" label in the row above. Its own tap box already covers
+    // the board and posts, so that's its art here.
+    const board = this.createNotesBoard(PG_NOTES.x, PG_NOTES.y, { boardKey: 'playground' });
+    const boardArt = board.hit.getBounds();
+    stops.push({
+      id: 'notes', hit: board.hit, label: board.label, pad: 0,
+      art: [boardArt.x, boardArt.y, boardArt.right, boardArt.bottom]
     });
+    this._pgFitHits(stops);
+
+    // After the stops: the pet's routines use the node table above.
+    this.createRecessPet();
 
     addLeaveButton(this, () => {
       const homeKey = this.world?.chapter === 2
@@ -2041,6 +2265,46 @@ export class HiddenWorldScene extends Phaser.Scene {
       music.fadeToTrack(this, homeKey);
       this.scene.start('WorldMapScene');
     });
+  }
+
+  // Tap boxes, fitted once every stop and label is placed. Each box covers its
+  // stop's drawn art (plus a finger's margin) and its own label, then is cut
+  // back so it never reaches into another stop's label: its top stops at the
+  // row line just under the labels of the row above (where the next row's art
+  // ends), and a neighbour's label in its row trims that side. Side-by-side
+  // neighbours whose art touches (the slide's ladder leans on the tower) split
+  // the strip they share at the front one's art edge: the stop made later is
+  // drawn in front, so it keeps what it covers. So a tap on a label, or on the
+  // art, lands on that stop and no other.
+  _pgFitHits(stops) {
+    const boxes = stops.map(s => ({ id: s.id, b: s.label.getBounds() }));
+    const fit = stops.map(stop => {
+      const own = boxes.find(o => o.id === stop.id).b;
+      const [ax, ay, ar, ab] = stop.art;
+      let l = Math.min(ax - stop.pad, own.x), r = Math.max(ar + stop.pad, own.right);
+      let t = Math.min(ay - stop.pad, own.y), b = Math.max(ab, own.bottom);
+      for (const { id, b: o } of boxes) {
+        if (id !== stop.id && o.bottom <= own.y) t = Math.max(t, Math.floor(o.bottom) + 1);
+      }
+      for (const { id, b: o } of boxes) {
+        if (id === stop.id || o.bottom <= t || o.y >= b || o.right <= l || o.x >= r) continue;
+        if (o.centerX > own.centerX) r = Math.ceil(o.x) - 1;
+        else l = Math.floor(o.right) + 1;
+      }
+      return { stop, l, t, r, b };
+    });
+    fit.forEach((back, i) => fit.slice(i + 1).forEach(front => {
+      const [bl, bt, , bb] = back.stop.art;
+      const [fl, ft, fr, fb] = front.stop.art;
+      const sideBySide = Math.min(bb, fb) - Math.max(bt, ft) > Math.min(bb - bt, fb - ft) / 2;
+      if (!sideBySide || back.r < front.l || front.r < back.l) return;
+      if (fl > bl) { back.r = Math.min(back.r, Math.floor(fl) - 1); front.l = Math.max(front.l, Math.floor(fl)); }
+      else { back.l = Math.max(back.l, Math.ceil(fr) + 1); front.r = Math.min(front.r, Math.ceil(fr)); }
+    }));
+    for (const { stop, l, t, r, b } of fit) {
+      stop.hit.setPosition((l + r) / 2, (t + b) / 2).setSize(r - l, b - t);
+      stop.hit.input?.hitArea?.setSize(r - l, b - t);
+    }
   }
 
   drawPlaygroundBackdrop() {
@@ -2123,43 +2387,55 @@ export class HiddenWorldScene extends Phaser.Scene {
     drawRunningTrack(bg, trackTop);
   }
 
-  // Companion pet on the woodchips; kept as `this._recessPet` for the swing.
+  // Companion pet on the woodchips, at the edge of the running track. It only
+  // plays when a kid taps a stop (see petInteract); between taps it idles in
+  // place, bobbing and looking around.
   createRecessPet() {
-    // Reset first: these fields outlive the scene. A busy flag left over from
-    // leaving mid-routine made the pet ignore every tap on later visits.
-    this._petActive = false;
+    // Reset first: these fields outlive the scene. A busy flag, a queued tap or
+    // a tag game left over from leaving mid-routine would wedge the next visit.
     this._recessPet = null;
     this._recessPetSprite = null;
-    this._recessPetBob = null;
+    this._pgBusy = false;
+    this._pgRunning = null;
+    this._pgQueued = null;
+    this._pgRestTimer = null;
+    this._pgIdleTween = null;
+    this._pgHomeWalk = null;
+    this._pgRestY = null;
+    this._pgTag = null;
+    this._pgDashY = null;
+    // The shared room-pet helpers (_gpWalkTo, _gpFoot, _gpJump, _gpEnter, ...)
+    // read the pet from these two fields, and only one room runs at a time, so
+    // they point at this room's pet. Their per-visit state resets here too.
+    this._roomPet = null;
+    this._roomPetSprite = null;
+    this._gpHeld = null;
+    this._gpHost = null;
+    this._gpHostNode = null;
+    this._gpFacing = -1;
     if (!companion.hasStarter()) return;
-    this._recessPetHome = { x: 770, y: 1650 };
-    const c = this.add.container(this._recessPetHome.x, this._recessPetHome.y).setDepth(11);
-    this._recessPet = c;
+
+    const pet = this.add.container(PG_HOME.x, 0).setDepth(11);
+    this._recessPet = pet;
     this._recessPetSprite = drawCompanion(this, 0, 0, { scale: 1.1 });
-    c.add(this._recessPetSprite);
+    pet.add(this._recessPetSprite);
+    this._roomPet = pet;
+    this._roomPetSprite = this._recessPetSprite;
+    pet.y = PG_HOME.feet - this._gpFoot(1);
 
-    this._recessPetBob = this.tweens.add({
-      targets: c,
-      y: this._recessPetHome.y - 8,
-      duration: 1500,
-      yoyo: true,
-      repeat: -1,
-      ease: 'Sine.easeInOut'
-    });
-
+    // Tap → chirp + heart. During the field's tag game a tap on the pet is a
+    // tag instead. The box grows for the game (see _pgTagHitBox).
     const hit = this.add.rectangle(0, 0, 130, 130, 0, 0)
       .setInteractive({ useHandCursor: true });
-    c.add(hit);
+    pet.add(hit);
+    this._pgPetHit = hit;
     hit.on('pointerdown', () => {
+      if (this._pgTag) { this._pgTagged(); return; }
       audio.playPetChirp?.();
-      const heart = this.add.text(c.x + 40, c.y - 40, '♥', style('display', {
-        fontSize: '36px', fill: '#ff9ec7'
-      })).setOrigin(0.5).setDepth(20);
-      this.tweens.add({
-        targets: heart, y: heart.y - 50, alpha: 0, duration: 700,
-        onComplete: () => heart.destroy()
-      });
+      this._gpEmote('♥');
     });
+
+    this._pgRest();
   }
 
   // Dad's notes board. Same daily mechanic as the garage whiteboard, but its own
@@ -2249,222 +2525,903 @@ export class HiddenWorldScene extends Phaser.Scene {
       badge.add(badgeHit);
       badgeHit.on('pointerdown', openNote);
     }
+    return { node, hit, label };
   }
 
-  // ----- Pet interactions: the companion actually plays on each piece -----
-  // One shared busy-guard so taps can't overlap mid-animation.
-  _startPetAction() {
-    if (this._petActive || !this._recessPet) return false;
-    this._petActive = true;
-    this._recessPetBob?.pause();
-    this._recessPet.setScale(1);
-    this._recessPet.angle = 0;
-    return true;
+  // ----- Pet play: the companion actually plays on each stop -----
+  // Tap-only, like Dad's Garage: a tap on a stop sends the pet there. A tap
+  // while it's busy is queued (the latest wins) and runs as soon as the
+  // current routine ends. Each routine takes a `done` callback and hands the
+  // pet back on the woodchips at scale 1, out of any object.
+  //
+  // Routines are built on the shared room-pet helpers (_gp*), in each object's
+  // own node coordinates (the ones its renderer draws in), sized from the pet
+  // via _gpFoot / _gpPeek so eggs and big adults both land on the rung, in the
+  // tire, on the disc. Landings put the pet's feet on a ground line, never on
+  // the label hanging under it.
+  petInteract(id) {
+    if (!this._recessPet?.active) return;
+    // The field's routine is one game of tag, from the walk out to the fence
+    // until the game ends: another Field tap in that time is the same game.
+    // On the way back (_pgFenceBack) it queues a fresh game like any other tap.
+    if (id === 'field' && this._pgRunning === 'field') return;
+    this._pgQueued = id;
+    // Mid tag game: the game winds down so the pet can go. On the way out
+    // to the field it skips the game instead (see pgFieldTag).
+    if (this._pgTag) { this._pgTagEnd(); return; }
+    if (!this._pgBusy) this._pgNext();
   }
 
-  _returnPetHome(onDone) {
+  _pgNext() {
     const pet = this._recessPet;
-    const home = this._recessPetHome;
-    this.tweens.add({
-      targets: pet, x: home.x, y: home.y, angle: 0, duration: 440, ease: 'Quad.easeInOut',
-      onComplete: () => {
-        pet.angle = 0; pet.setScale(1);
-        this._petActive = false;
-        this._recessPetBob?.resume();
-        onDone?.();
+    const id = this._pgQueued;
+    if (!pet?.active || this._pgBusy || !id) return;
+    this._pgRestTimer?.remove(false);
+    this._pgRestTimer = null;
+    this._pgIdleTween?.stop();
+    this._pgIdleTween = null;
+    if (this._pgRestY != null) pet.y = this._pgRestY;
+    this._pgRestY = null;
+    this._pgHomeWalk?.stop();
+    this._pgHomeWalk = null;
+    pet.angle = 0;
+    this._pgQueued = null;
+    this._pgBusy = true;
+    this._pgRunning = id;
+    // The monkey-bar secret: the first crossing a kid asks for finds it.
+    const unlock = id === 'bars' && !progress.isHiddenWorldCleared(18);
+    const routine = {
+      field:   this.pgFieldTag,
+      tower:   this.pgTowerLava,
+      slide:   this.pgSlide,
+      bars:    this.pgMonkeyBars,
+      wall:    this.pgClimbWall,
+      zipline: this.pgZipLine,
+      tire:    this.pgTireSwing,
+      spinner: this.pgSpin,
+      track:   this.pgRunTrack
+    }[id];
+    routine.call(this, () => {
+      // The found-it card holds the pet, and any tap queued meanwhile, until
+      // it's closed, so the next stop plays in the open room, not under the dim.
+      if (unlock) { this.showRecessUnlock(() => this._pgRest()); return; }
+      this._pgRest();
+    });
+  }
+
+  // Between routines. A tap that came in meanwhile runs after a short beat;
+  // otherwise the pet walks home to the track's edge and idles there. It isn't
+  // busy on the way home, so a tap turns it around right where it is.
+  _pgRest() {
+    const pet = this._recessPet;
+    if (!pet?.active) return;
+    if (this._gpHost) this._gpExit();
+    this._gpDrop();
+    pet.setScale(1);
+    pet.angle = 0;
+    this._pgBusy = false;
+    this._pgRunning = null;
+    if (this._pgQueued) {
+      this._pgRestTimer = this.time.delayedCall(250, () => this._pgNext());
+      return;
+    }
+    this._pgHomeWalk = this._pgWalk(PG_HOME.x, PG_HOME.feet, () => {
+      this._pgHomeWalk = null;
+      this._pgIdle();
+    });
+  }
+
+  // Stand and look around until a kid taps something: a small bob, and now
+  // and then a glance back over its shoulder.
+  _pgIdle() {
+    const pet = this._recessPet;
+    if (!pet?.active || this._pgBusy) return;
+    const y0 = pet.y;
+    this._pgRestY = y0;
+    const face0 = this._gpFacing;
+    const look = { p: 0 };
+    this._pgIdleTween = this.tweens.add({
+      targets: look, p: 1, duration: 3200, repeat: -1,
+      onUpdate: () => {
+        const want = (look.p > 0.45 && look.p < 0.75) ? -face0 : face0;
+        if (want !== this._gpFacing) this._gpFace(want);
+        pet.y = y0 - (1 - Math.cos(look.p * Math.PI * 4)) * 4;
+        pet.angle = Math.sin(look.p * Math.PI * 2) * 3;
       }
     });
   }
 
-  _petMoveTo(x, y, dur, cb, ease) {
-    this.tweens.add({ targets: this._recessPet, x, y, duration: dur, ease: ease || 'Quad.easeInOut', onComplete: cb });
+  // ----- Playground pet helpers -----
+
+  _pgNode(id) {
+    return this._pgItems?.[id]?.node;
   }
 
-  // Route an equipment tap to the matching pet activity (busy-guarded).
-  petInteract(id) {
-    if (!this._recessPet || this._petActive) return;
-    switch (id) {
-      case 'tower':   return this.petClimbTower();
-      case 'slide':   return this.petSlide();
-      case 'bars':    return this.handleMonkeyBars();
-      case 'wall':    return this.petClimbWall();
-      case 'zipline': return this.petZipLine();
-      case 'tire':    return this.petTireSwing();
-      case 'spinner': return this.petSpin();
+  // A scene point in an object's own coordinates (the reverse of _gpAt).
+  _pgLocal(host, x, y) {
+    return host.getWorldTransformMatrix().applyInverse(x, y);
+  }
+
+  // A Graphics piece drawn into `host` (a node or one of its parts).
+  _pgPiece(host, draw, visible = true) {
+    const g = this.add.graphics();
+    draw(g);
+    g.setVisible(visible);
+    host.add(g);
+    return g;
+  }
+
+  // Walk the pet to a spot on the woodchips (its feet at `feetY`), hop-stepping
+  // along the rows' ground lines and up or down the open gaps between them
+  // (PG_WALK_Y / PG_WALK_X) rather than straight across the equipment. One
+  // tween for the whole route, so a tap can stop it cleanly. Always calls back
+  // on a later frame, like _gpWalkTo. Only used at scale 1, never hosted.
+  _pgWalk(x, feetY, cb) {
+    const pet = this._recessPet;
+    const f = this._gpFoot(1);
+    const L = PG_WALK_Y;
+    const laneOf = (y) => L.reduce((best, ly, i) =>
+      (Math.abs(y - ly) < Math.abs(y - L[best]) ? i : best), 0);
+    const x0 = pet.x, y0 = pet.y + f;
+    const to = laneOf(feetY);
+    // Starting off every lane line: first finish the leg straight up or down
+    // where it stands. Just off a stop, that's the nearest lane. In a gap
+    // column (partway down it when a tap came, or out at the fence) it's the
+    // lane on the target's side of it, so it never cuts across the equipment.
+    let lane = laneOf(y0);
+    if (Math.abs(y0 - L[lane]) > 2 && PG_WALK_X.some(cx => Math.abs(x0 - cx) < 3)) {
+      const below = L.findIndex(ly => ly > y0);
+      const above = (below < 0 ? L.length : below) - 1;
+      if (above < 0) lane = below;
+      else if (below < 0) lane = above;
+      else lane = to <= above ? above : below;
+    }
+    const pts = [[x0, y0], [x0, L[lane]]];
+    while (lane !== to) {
+      const dir = to > lane ? 1 : -1;
+      const colX = PG_WALK_X[dir > 0 ? lane : lane - 1];
+      pts.push([colX, L[lane]]);
+      lane += dir;
+      pts.push([colX, L[lane]]);
+    }
+    pts.push([x, L[to]], [x, feetY]);
+    const segs = [];
+    let len = 0;
+    for (let i = 1; i < pts.length; i++) {
+      const [ax, ay] = pts[i - 1], [bx, by] = pts[i];
+      const d = Math.hypot(bx - ax, by - ay);
+      if (d < 1) continue;
+      segs.push({ ax, ay, bx, by, d, at: len });
+      len += d;
+    }
+    const steps = Math.max(2, Math.round(len / 64));
+    const drv = { p: 0 };
+    let seg = -1;
+    return this.tweens.add({
+      targets: drv, p: 1, duration: len < 4 ? 1 : 200 + len * 0.75, ease: 'Sine.easeInOut',
+      onUpdate: () => {
+        if (!segs.length) return;
+        const dist = drv.p * len;
+        let k = segs.findIndex(s => dist <= s.at + s.d);
+        if (k < 0) k = segs.length - 1;
+        const s = segs[k];
+        if (k !== seg) {
+          seg = k;
+          if (Math.abs(s.bx - s.ax) > 6) this._gpFace(s.bx > s.ax ? 1 : -1);
+        }
+        const q = Math.min(1, (dist - s.at) / s.d);
+        const bob = Math.sin(drv.p * Math.PI * steps);
+        pet.x = s.ax + (s.bx - s.ax) * q;
+        pet.y = s.ay + (s.by - s.ay) * q - f - Math.abs(bob) * 12;
+        pet.angle = bob * 4;
+      },
+      onComplete: () => { pet.x = x; pet.y = feetY - f; pet.angle = 0; cb?.(); }
+    });
+  }
+
+  // A quick dash in the scene at the pet's current size (on the grass, on the
+  // track), little steps, facing the way it goes. `lean` tips it forward.
+  _pgDash(x, feetY, dur, cb, { ease = 'Sine.easeInOut', hop = 8, lean = 0, stride = 50 } = {}) {
+    const pet = this._recessPet;
+    const sx = pet.x, sy = pet.y, ty = feetY - this._gpFoot(pet.scaleY);
+    if (Math.abs(x - sx) > 6) this._gpFace(x > sx ? 1 : -1);
+    const steps = Math.max(2, Math.round(Math.abs(x - sx) / stride));
+    const drv = { p: 0 };
+    return this.tweens.add({
+      targets: drv, p: 1, duration: dur, ease,
+      onUpdate: () => {
+        // Where it would stand now without the hop, for a clean stop mid-dash.
+        this._pgDashY = sy + (ty - sy) * drv.p;
+        pet.x = sx + (x - sx) * drv.p;
+        pet.y = this._pgDashY - Math.abs(Math.sin(drv.p * Math.PI * steps)) * hop;
+        pet.angle = lean * this._gpFacing;
+      },
+      onComplete: () => { pet.x = x; pet.y = ty; pet.angle = 0; cb?.(); }
+    });
+  }
+
+  // A filled four-point sparkle that pops and fades (never rays or a burst).
+  _pgSparkle(x, y, color = 0xfff3b8, size = 16) {
+    const g = this.add.graphics().setDepth(20);
+    g.fillStyle(color, 1);
+    const pts = [];
+    for (let i = 0; i < 8; i++) {
+      const a = i * Math.PI / 4 - Math.PI / 2;
+      const r = i % 2 ? size * 0.3 : size;
+      pts.push({ x: Math.cos(a) * r, y: Math.sin(a) * r });
+    }
+    g.fillPoints(pts, true);
+    g.setPosition(x, y).setScale(0);
+    this.tweens.add({
+      targets: g, scale: 1, duration: 180, hold: 260, yoyo: true, ease: 'Back.easeOut',
+      onComplete: () => g.destroy()
+    });
+  }
+
+  // A few sparkles around the pet's head, one after another.
+  _pgSparkles(n = 3) {
+    for (let i = 0; i < n; i++) {
+      this.time.delayedCall(i * 140, () => {
+        if (!this._recessPet?.active) return;
+        const at = this._gpWorld();
+        const top = at.y - this._gpFoot();
+        this._pgSparkle(at.x + (i - (n - 1) / 2) * 44, top - 10 - (i % 2) * 18);
+      });
     }
   }
 
-  // Play tower (250,900): climb to the top deck, happy hop, climb down.
-  petClimbTower() {
-    if (!this._startPetAction()) return;
-    const pet = this._recessPet;
-    this._petMoveTo(262, 1120, 360, () => {
-      this._petMoveTo(262, 778, 640, () => {
-        this.tweens.add({ targets: pet, y: 752, duration: 220, yoyo: true, repeat: 1, ease: 'Sine.easeInOut',
-          onComplete: () => this._returnPetHome() });
-      }, 'Sine.easeInOut');
-    });
-  }
+  // ----- Playground pet routines, one per stop -----
 
-  // Big slide (470,980): climb the ladder, then ride the chute down.
-  petSlide() {
-    if (!this._startPetAction()) return;
+  // Play tower: "The floor is lava!" Up the ladder in the left bay onto the top
+  // deck, peek over the railing at the lava below, edge along it, then down
+  // deck by deck and a hot-foot dance on the woodchips.
+  pgTowerLava(done) {
+    const node = this._pgNode('tower');
+    const parts = node?.pgParts;
+    if (!parts) { done(); return; }
     const pet = this._recessPet;
-    this._petMoveTo(388, 1160, 320, () => {
-      this._petMoveTo(402, 800, 520, () => {
-        this.tweens.add({ targets: pet, x: 590, duration: 640, ease: 'Quad.easeIn',
-          onUpdate: (tw) => { const p = tw.progress; pet.y = 805 + 318 * (p * p * (3 - 2 * p)); pet.angle = 12 * Math.sin(p * Math.PI); },
-          onComplete: () => this._returnPetHome() });
-      }, 'Sine.easeInOut');
+    const S = 0.62;
+    const f = this._gpFoot(S);
+    const ladderX = -75;
+    const steps = [128, 56, -8];                 // rung tops, below the top deck
+    const peekY = this._gpPeek(-108, S);         // eyes just over the railing
+    const at = this._gpAt(node, ladderX, 200);
+    this._pgWalk(at.x, at.y, () => {
+      this._gpEnter(node);
+      this._gpFace(1);
+      climb(0);
     });
-  }
-
-  // Climbing wall (160,1330): scoot up the holds with a little side-to-side.
-  petClimbWall() {
-    if (!this._startPetAction()) return;
-    const pet = this._recessPet;
-    this._petMoveTo(160, 1478, 340, () => {
-      this.tweens.add({ targets: pet, y: 1208, duration: 900, ease: 'Sine.easeInOut',
-        onUpdate: (tw) => { pet.x = 160 + Math.sin(tw.progress * Math.PI * 5) * 12; },
-        onComplete: () => this._returnPetHome() });
-    });
-  }
-
-  // Zip line (490,1330): grab the handle and zoom along the rail.
-  petZipLine() {
-    if (!this._startPetAction()) return;
-    const pet = this._recessPet;
-    this._petMoveTo(380, 1300, 340, () => {
-      this.tweens.add({ targets: pet, x: 604, duration: 950, ease: 'Sine.easeIn',
-        onUpdate: (tw) => { const p = tw.progress; pet.y = 1300 + Math.sin(p * Math.PI) * 10; pet.angle = 6 * Math.sin(p * Math.PI * 3); },
-        onComplete: () => this._returnPetHome() });
-    });
-  }
-
-  // Tire swing (850,1330): hop in and swing back and forth.
-  petTireSwing() {
-    if (!this._startPetAction()) return;
-    const pet = this._recessPet;
-    this._petMoveTo(850, 1405, 360, () => {
-      const drv = { p: 0 };
-      this.tweens.add({ targets: drv, p: 1, duration: 1600, ease: 'Linear',
-        onUpdate: () => { const s = Math.sin(drv.p * Math.PI * 4); pet.x = 850 + s * 80; pet.angle = s * 14; },
-        onComplete: () => this._returnPetHome() });
-    });
-  }
-
-  // Spinner (230,1580): stand on the seat and spin (the disc spins too).
-  petSpin() {
-    if (!this._startPetAction()) return;
-    const pet = this._recessPet;
-    const disc = this._recessNode_spinner;
-    this._petMoveTo(230, 1542, 340, () => {
-      if (disc) this.tweens.add({ targets: disc, angle: '+=720', duration: 900, ease: 'Cubic.easeOut' });
-      this.tweens.add({ targets: pet, angle: '+=720', duration: 900, ease: 'Cubic.easeOut',
-        onComplete: () => this._returnPetHome() });
-    });
-  }
-
-  // Running track: a wide lap along the full-width band at the bottom.
-  petRunTrack() {
-    if (!this._startPetAction()) return;
-    const pet = this._recessPet;
-    const trackY = H - 84;
-    const drv = { p: 0 };
-    this.tweens.add({
-      targets: drv, p: 1, duration: 1700, ease: 'Sine.easeInOut',
-      onUpdate: () => {
-        const a = drv.p * Math.PI * 2;
-        pet.x = W / 2 + Math.cos(a - Math.PI / 2) * 400;
-        pet.y = trackY + Math.sin(a - Math.PI / 2) * 26;
-      },
-      onComplete: () => this._returnPetHome()
-    });
-  }
-
-  // Monkey bars (840,920) — the hidden gem. Pet swings across; first clear
-  // pops the unlock, replays just say "Again!".
-  handleMonkeyBars() {
-    if (!this._startPetAction()) return;
-    const firstTime = !progress.isHiddenWorldCleared(18);
-    this._petMoveTo(700, 870, 360, () => {
-      this.playMonkeyBarSwing(() => {
-        this._returnPetHome(() => {
-          if (firstTime) this.showRecessUnlock();
-          else this.showBubble(840, 1110, 'Slow is smooth, smooth is fast.');
-        });
-      });
-    });
-  }
-
-  // Hand-over-hand left→right along the bars (pet already at the start rung).
-  playMonkeyBarSwing(onDone) {
-    const pet = this._recessPet;
-    const barY = 870, startX = 700, endX = 980, rungs = 6;
-    pet.y = barY; pet.setScale(1);
-    let i = 0;
-    const stepX = (endX - startX) / rungs;
-    const swingNext = () => {
-      if (i >= rungs) { onDone?.(); return; }
-      const nx = startX + stepX * (i + 1);
-      this.tweens.add({
-        targets: pet, x: nx, angle: { from: -8, to: 8 }, duration: 280, ease: 'Sine.easeInOut',
-        onUpdate: (tw) => { pet.y = barY - Math.sin(tw.progress * Math.PI) * 26; },
-        onComplete: () => { pet.angle = 0; i++; swingNext(); }
+    const climb = (i) => {
+      if (i === steps.length) {
+        this._gpJump(ladderX + 8, peekY, 30, 300, () => this.time.delayedCall(140, lookDown),
+          { onMid: () => this._gpBehind(parts.front) });
+        return;
+      }
+      this._gpJump(ladderX, steps[i] - f, 22, 240, () => this.time.delayedCall(50, () => climb(i + 1)),
+        i === 0 ? { scale: S } : {});
+    };
+    // A long look down each side, a shiver, then a careful shuffle along.
+    const lookDown = () => {
+      this._gpFace(-1);
+      this.time.delayedCall(360, () => {
+        this._gpFace(1);
+        this._gpEmote('!', '#ff7a3a');
+        this._gpJitter(4, 3, () => this._gpTo(56, peekY, 620, () => this.time.delayedCall(200, down), 'Sine.easeInOut'));
       });
     };
-    swingNext();
+    const down = () => {
+      this._gpInFront();
+      parts.front.setVisible(false);
+      this._gpJump(80, 20 - f, 40, 340, () => this._gpSquash(() => {
+        this._gpJump(150, 200 - this._gpFoot(1), 60, 460, () => hotFoot(4), { scale: 1 });
+      }, 0.12));
+    };
+    // Hot, hot, hot: quick hops, turning each time, orange puffs underfoot.
+    const hotFoot = (n) => {
+      const w = this._gpWorld();
+      this._gpPuffs(w.x, w.y + this._gpFoot(1), 0xff8a3d, 3, 34, 26);
+      this._gpFace(-this._gpFacing);
+      this._gpHop(1, 20, () => {
+        if (n > 1) { hotFoot(n - 1); return; }
+        this._gpExit();
+        done();
+      });
+    };
   }
 
-  // Found-it celebration — models on showUnlockCelebration.
-  showRecessUnlock() {
+  // Big slide: up the ladder, sit in at the top, ride the chute down along the
+  // renderer's own centreline (tilted to the slope, tucked in under the near
+  // rail), then shoot off the lip onto the woodchips.
+  pgSlide(done) {
+    const node = this._pgNode('slide');
+    const parts = node?.pgParts;
+    if (!parts) { done(); return; }
+    const pet = this._recessPet;
+    const S = 0.62;
+    const f = this._gpFoot(S);
+    const ladderX = -91;
+    const rungs = [130, 50, -30, -110];          // rung tops, every other one
+    // The pet's bottom sits a little below the centreline, under the front
+    // piece; `k` is how far its origin rides above that line.
+    const k = f * 0.65;
+    const seatAt = (t) => {
+      const c = slideAt(t);
+      const tilt = Math.min(slideAngle(t) * 0.6, Phaser.Math.DegToRad(40));
+      return { x: c.x + k * Math.sin(tilt), y: c.y - k * Math.cos(tilt), tilt };
+    };
+    const at = this._gpAt(node, ladderX, 188);
+    this._pgWalk(at.x, at.y, () => {
+      this._gpEnter(node);
+      this._gpFace(1);
+      climb(0);
+    });
+    const climb = (i) => {
+      if (i === rungs.length) {
+        this._gpJump(-80, -198 - f, 26, 280, () => this._gpSquash(sitIn, 0.1));
+        return;
+      }
+      this._gpJump(ladderX, rungs[i] - f, 22, 240, () => this.time.delayedCall(50, () => climb(i + 1)),
+        i === 0 ? { scale: S } : {});
+    };
+    const sitIn = () => {
+      const s0 = seatAt(0);
+      this._gpJump(s0.x, s0.y, 14, 220, () => this.time.delayedCall(160, ride),
+        { onMid: () => this._gpBehind(parts.front) });
+    };
+    const ride = () => {
+      const drv = { t: 0 };
+      this.tweens.add({
+        targets: drv, t: 1, duration: 1000, ease: 'Quad.easeIn',
+        onUpdate: () => {
+          const s = seatAt(drv.t);
+          pet.x = s.x;
+          pet.y = s.y;
+          pet.angle = Phaser.Math.RadToDeg(s.tilt);
+        },
+        onComplete: () => {
+          pet.angle = 0;
+          this._gpInFront();
+          parts.front.setVisible(false);
+          // Off the lip and onto the ground line, in the gap past the slide.
+          this._gpJump(176, 188 - this._gpFoot(1), 34, 420, () => {
+            const w = this._gpWorld();
+            this._gpPuffs(w.x, w.y + this._gpFoot(1), 0xd8b67e, 6, 50, 30);
+            this._gpSquash(() => this._gpHop(2, 12, () => {
+              this._gpEmote('♥');
+              this._gpExit();
+              done();
+            }));
+          }, { scale: 1 });
+        }
+      });
+    };
+  }
+
+  // Monkey bars (the room's secret): jump up and hang UNDER the bars, hands
+  // behind the lower rail, and swing hand over hand along the drawn rungs,
+  // the body trailing each reach. Drop at the far end. The found-it card is
+  // shown by _pgNext, only for a kid's own tap.
+  pgMonkeyBars(done) {
+    const node = this._pgNode('bars');
+    const parts = node?.pgParts;
+    if (!parts) { done(); return; }
+    const pet = this._recessPet;
+    const S = 0.85;
+    const f = this._gpFoot(S);
+    const gripY = -96;                            // hands on the lower rail
+    const rungs = PG_BAR_RUNGS;
+    // Hang from (px, gripY), the body swung by `th` radians (positive swings
+    // the feet left). The pet's top is at the grip, its body below.
+    const hang = (px, th) => {
+      pet.x = px - f * Math.sin(th);
+      pet.y = gripY + f * Math.cos(th);
+      pet.angle = Phaser.Math.RadToDeg(th);
+    };
+    const at = this._gpAt(node, rungs[0], 172);
+    this._pgWalk(at.x, at.y, () => {
+      this._gpEnter(node);
+      this._gpFace(1);
+      this._gpJump(rungs[0], gripY + f, 20, 380, () => this.time.delayedCall(140, () => swing(0)),
+        { scale: S, onMid: () => this._gpBehind(parts.front) });
+    });
+    const swing = (i) => {
+      if (i === rungs.length - 1) { dropOff(); return; }
+      const r0 = rungs[i], r1 = rungs[i + 1];
+      const drv = { p: 0 };
+      this.tweens.add({
+        targets: drv, p: 1, duration: 300, ease: 'Sine.easeInOut',
+        onUpdate: () => hang(r0 + (r1 - r0) * drv.p, Phaser.Math.DegToRad(14) * Math.sin(drv.p * Math.PI)),
+        onComplete: () => { hang(r1, 0); this.time.delayedCall(40, () => swing(i + 1)); }
+      });
+    };
+    const dropOff = () => {
+      this._gpInFront();
+      parts.front.setVisible(false);
+      this._gpJump(rungs[rungs.length - 1], 172 - this._gpFoot(1), 8, 360, () => {
+        const w = this._gpWorld();
+        this._gpPuffs(w.x, w.y + this._gpFoot(1), 0xd8b67e, 5, 44, 26);
+        this._gpSquash(() => this._gpHop(2, 12, () => {
+          this._gpEmote('♥');
+          this._gpExit();
+          done();
+        }));
+      }, { scale: 1 });
+    };
+  }
+
+  // Climbing wall: hold to hold up the drawn holds, a slip halfway ("Watch
+  // your step!"), top out and look around, then jump down the far side.
+  pgClimbWall(done) {
+    const node = this._pgNode('wall');
+    if (!node) { done(); return; }
+    const pet = this._recessPet;
+    const S = 0.7;
+    const f = this._gpFoot(S);
+    // Bottom to top, zigzagging. Hands on the hold, body hanging below it.
+    const holds = PG_WALL_HOLDS;
+    const grip = ([hx, hy]) => ({ x: hx, y: hy + f * 0.4 });
+    const at = this._gpAt(node, holds[0][0], 142);
+    this._pgWalk(at.x, at.y, () => {
+      this._gpEnter(node);
+      this._gpFace(1);
+      const g0 = grip(holds[0]);
+      this._gpJump(g0.x, g0.y, 20, 300, () => climb(1), { scale: S });
+    });
+    const climb = (i) => {
+      if (i === holds.length) { topOut(); return; }
+      const g = grip(holds[i]);
+      const x0 = pet.x;
+      if (Math.abs(g.x - x0) > 6) this._gpFace(g.x > x0 ? 1 : -1);
+      this._gpJump(g.x, g.y, 14, 260, () => {
+        if (i === 3) { slip(g, () => climb(i + 1)); return; }
+        this.time.delayedCall(60, () => climb(i + 1));
+      });
+    };
+    const slip = (g, cb) => {
+      this._gpEmote('!', '#ff7a3a');
+      this._gpTo(g.x, g.y + 26, 120, () => this._gpJitter(4, 4, () => this._gpTo(g.x, g.y, 240, cb, 'Sine.easeOut')), 'Quad.easeIn');
+    };
+    // Sits astride the top edge (lower half hanging down the face), so a big
+    // pet up there stays clear of the "Play tower" label in the row above.
+    const topOut = () => {
+      this._gpJump(-6, -120 - f * 0.55, 34, 340, () => this._gpSquash(() => {
+        this._gpFace(-1);
+        this.time.delayedCall(340, () => {
+          this._gpFace(1);
+          this.time.delayedCall(340, () => this._gpHop(2, 12, () => {
+            this._gpJump(150, 142 - this._gpFoot(1), 70, 520, () => {
+              const w = this._gpWorld();
+              this._gpPuffs(w.x, w.y + this._gpFoot(1), 0xd8b67e, 5, 44, 26);
+              this._gpSquash(() => { this._gpExit(); done(); });
+            }, { scale: 1 });
+          }));
+        });
+      }, 0.1));
+    };
+  }
+
+  // Zip line: grab the grip under the trolley at the high end, ride it
+  // downhill (right to left) with the body trailing, bounce off the stop at
+  // the low end, let go. The trolley then rolls back up on its own.
+  pgZipLine(done) {
+    const node = this._pgNode('zipline');
+    const parts = node?.pgParts;
+    if (!parts) { done(); return; }
+    const pet = this._recessPet;
+    const trolley = parts.trolley;
+    const S = 0.6;
+    const f = this._gpFoot(S);
+    // Grip to the pet's middle: its top tucked behind the grip, but never so
+    // high that the grip (bottom edge 9px under its middle) covers the eyes.
+    const r = Math.max(f - 4, 19 - this._gpEyeY(S));
+    const hang = (th) => {
+      pet.x = PG_ZIP.gripX - r * Math.sin(th);
+      pet.y = PG_ZIP.gripY + r * Math.cos(th);
+      pet.angle = Phaser.Math.RadToDeg(th);
+    };
+    const moveTrolley = (x) => { trolley.x = x; trolley.y = zipRailY(x); };
+    // Still rolling back from the last ride: hurry it home meanwhile.
+    const rollHome = (dur, delay = 0) => {
+      parts.roll?.stop();
+      const back = { x: trolley.x };
+      parts.roll = this.tweens.add({
+        targets: back, x: PG_ZIP.restX, duration: dur, delay, ease: 'Sine.easeInOut',
+        onUpdate: () => moveTrolley(back.x),
+        onComplete: () => { parts.roll = null; }
+      });
+    };
+    if (trolley.x !== PG_ZIP.restX) rollHome(300);
+    const at = this._gpAt(node, PG_ZIP.restX, 110);
+    this._pgWalk(at.x, at.y, () => {
+      parts.roll?.stop();
+      parts.roll = null;
+      moveTrolley(PG_ZIP.restX);
+      this._gpEnter(trolley);
+      this._gpFace(-1);
+      this._gpJump(PG_ZIP.gripX, PG_ZIP.gripY + r, 30, 380, () => this.time.delayedCall(180, ride),
+        { scale: S, onMid: () => this._gpBehind(parts.grip) });
+    });
+    const ride = () => {
+      const drv = { p: 0 };
+      this.tweens.add({
+        targets: drv, p: 1, duration: 1100, ease: 'Sine.easeIn',
+        onUpdate: () => {
+          moveTrolley(PG_ZIP.restX + (PG_ZIP.stopX - PG_ZIP.restX) * drv.p);
+          hang(-Phaser.Math.DegToRad(16) * drv.p);
+        },
+        onComplete: bounce
+      });
+    };
+    // Clunk into the stop: the trolley kicks back a little, the pet swings
+    // forward and back until it settles.
+    const bounce = () => {
+      this._gpEmote('!', '#ffd86b');
+      const drv = { q: 0 };
+      this.tweens.add({
+        targets: drv, q: 1, duration: 1100, ease: 'Linear',
+        onUpdate: () => {
+          const q = drv.q;
+          moveTrolley(PG_ZIP.stopX + Math.sin(Math.min(1, q * 4) * Math.PI) * 16);
+          hang(-Phaser.Math.DegToRad(16) * Math.cos(q * Math.PI * 4) * Math.pow(1 - q, 1.5));
+        },
+        onComplete: () => { moveTrolley(PG_ZIP.stopX); hang(0); this.time.delayedCall(120, letGo); }
+      });
+    };
+    const letGo = () => {
+      this._gpInFront();
+      this._gpJump(PG_ZIP.gripX, 110 - this._gpFoot(1) - trolley.y, 20, 360, () => {
+        this._gpExit();
+        const w = this._gpWorld();
+        this._gpPuffs(w.x, w.y + this._gpFoot(1), 0xd8b67e, 5, 44, 26);
+        rollHome(1400, 200);
+        this._gpSquash(done);
+      }, { scale: 1 });
+    };
+  }
+
+  // Tire swing: hop into the tire (behind its front half) and the whole tire
+  // and chains swing from the top bar, higher and then settling. Hop out.
+  pgTireSwing(done) {
+    const node = this._pgNode('tire');
+    const parts = node?.pgParts;
+    if (!parts) { done(); return; }
+    const pet = this._recessPet;
+    const swing = parts.swing;
+    const S = 0.6;
+    const seat = { x: 0, y: PG_TIRE.seatY - this._gpFoot(S) };   // swing space
+    const at = this._gpAt(node, 0, 182);
+    this._pgWalk(at.x, at.y, () => {
+      swing.angle = 0;
+      this._gpEnter(swing);
+      this._gpFace(1);
+      this._gpJump(seat.x, seat.y, 60, 460, () => this._gpSquash(pump, 0.1),
+        { scale: S, onMid: () => this._gpBehind(parts.front) });
+    });
+    const pump = () => {
+      const drv = { p: 0 };
+      let cheered = false;
+      this.tweens.add({
+        targets: drv, p: 1, duration: 3000, ease: 'Linear',
+        onUpdate: () => {
+          const p = drv.p;
+          swing.angle = 22 * Math.sin(Math.PI * p) * Math.sin(Math.PI * 2 * 2.5 * p);
+          // Leaning into each swing like a kid pumping their legs.
+          pet.angle = -swing.angle * 0.35;
+          if (!cheered && p > 0.5) { cheered = true; this._gpEmote('♥'); }
+        },
+        onComplete: () => { swing.angle = 0; pet.angle = 0; this.time.delayedCall(160, hopOut); }
+      });
+    };
+    const hopOut = () => {
+      this._gpInFront();
+      parts.front.setVisible(false);
+      this._gpFace(-1);
+      // Swing space is node space moved up to the top bar (the swing's at rest).
+      this._gpJump(-100, 182 - this._gpFoot(1) - swing.y, 60, 480, () => {
+        this._gpExit();
+        const w = this._gpWorld();
+        this._gpPuffs(w.x, w.y + this._gpFoot(1), 0xd8b67e, 5, 44, 26);
+        this._gpSquash(done);
+      }, { scale: 1 });
+    };
+  }
+
+  // Spinner: hop up on the disc, which spins on its post (only the disc: the
+  // grip dots run round its rim). The pet spins by turning, quick facing flips
+  // every half turn, never cartwheeling. Then a dizzy wobble and hop off.
+  pgSpin(done) {
+    const node = this._pgNode('spinner');
+    const parts = node?.pgParts;
+    if (!parts) { done(); return; }
+    const pet = this._recessPet;
+    const S = 0.8;
+    const top = { x: 0, y: -26 - this._gpFoot(S) };
+    const at = this._gpAt(node, 110, 95);
+    this._pgWalk(at.x, at.y, () => {
+      this._gpEnter(node);
+      this._gpFace(-1);
+      this._gpJump(top.x, top.y, 70, 460, () => this._gpSquash(spin, 0.1), { scale: S });
+    });
+    const spin = () => {
+      const drv = { a: parts.phase };
+      const a0 = parts.phase;
+      this.tweens.add({
+        targets: drv, a: a0 + Math.PI * 7, duration: 2000, ease: 'Cubic.easeInOut',
+        onUpdate: () => {
+          parts.turn(drv.a);
+          const want = Math.cos(drv.a - a0) >= 0 ? -1 : 1;
+          if (want !== this._gpFacing) this._gpFace(want);
+        },
+        onComplete: dizzy
+      });
+    };
+    const dizzy = () => {
+      this._pgSparkles(3);
+      this.tweens.add({
+        targets: pet, angle: { from: -10, to: 10 }, duration: 220, yoyo: true, repeat: 2, ease: 'Sine.easeInOut',
+        onComplete: () => {
+          pet.angle = 0;
+          this._gpFace(1);
+          this._gpJump(110, 95 - this._gpFoot(1), 60, 460, () => this._gpSquash(() => { this._gpExit(); done(); }), { scale: 1 });
+        }
+      });
+    };
+  }
+
+  // Running track ("Super fast!"): hop down onto the track facing right, run
+  // left to right kicking up dust, off the right edge, a beat round the back
+  // straight, back in from the left edge, slow down and hop home.
+  pgRunTrack(done) {
+    const pet = this._recessPet;
+    const f = this._gpFoot(1);
+    const feet = PG_TRACK_TOP + 126;               // on the third lane
+    // Fully off screen: half the body plus whatever it's carrying (a held
+    // cosmetic sticks out past the body). Never getBounds: the pet's Graphics
+    // children make it report the whole screen.
+    const out = this._gpHalfW(1) + PG_CARRY;
+    const dust = () => this.time.addEvent({
+      delay: 70, loop: true,
+      callback: () => {
+        if (pet.x < -20 || pet.x > W + 20) return;
+        this._gpPuffs(pet.x - this._gpFacing * this._gpHalfW(1) * 0.5, feet, 0xcfe0f5, 2, 16, 18);
+      }
+    });
+    const run = (x, dur, ease, cb) => {
+      const d = dust();
+      this._pgDash(x, feet, dur, () => { d.remove(false); cb(); }, { ease, hop: 10, lean: 8, stride: 70 });
+    };
+    this._pgWalk(PG_HOME.x, PG_HOME.feet, () => {
+      this._gpFace(1);
+      this._gpJump(PG_HOME.x + 60, feet - f, 50, 420, () => this._gpSquash(() => {
+        run(W + out, 700, 'Quad.easeIn', () => this.time.delayedCall(300, () => {
+          pet.x = -out;
+          run(PG_HOME.x, 1300, 'Sine.easeOut', () => {
+            this._gpJump(PG_HOME.x, PG_HOME.feet - f, 50, 420, () => this._gpSquash(done));
+          });
+        }));
+      }, 0.1));
+    });
+  }
+
+  // Field: a game of tag ("Catch me if you can!"). The pet hops the fence onto
+  // the grass, smaller because it's farther away, and darts about. Each tap ON
+  // the pet is a tag: a squeal and a dash the other way. The third tag it lets
+  // itself be caught, spins for joy and comes back over the fence. No score,
+  // no losing: left alone for a while, it just comes back.
+  pgFieldTag(done) {
+    const pet = this._recessPet;
+    const S = PG_FIELD.scale;
+    this._pgWalk(PG_FENCE.x, PG_FENCE.feet, () => {
+      this._gpFace(1);
+      this._gpJump(PG_FENCE.x + 40, PG_FIELD.feet[1] - this._gpFoot(S), 70, 560, () => {
+        this._gpPuffs(pet.x, PG_FIELD.feet[1], 0x8fd46e, 5, 36, 22);
+        this._gpSquash(() => {
+          // Another stop was tapped on the way out: no game, straight back
+          // over the fence so that stop runs next.
+          if (this._pgQueued) { this._pgFenceBack(done); return; }
+          const tag = { hits: 0, gen: 0, darts: 0, tw: null, timer: null, done };
+          this._pgDashY = pet.y;
+          this._pgTag = tag;
+          this._pgTagHitBox(true);
+          // A cheeky "come and get me" hop, then off it goes.
+          this._gpHop(2, 12, () => { if (this._pgTag === tag) this._pgTagRun(); });
+        }, 0.12);
+      }, { scale: S });
+    });
+  }
+
+  // Dash to a fresh spot on the grass, pause a beat to be caught, repeat.
+  // `x` given = a squeal-and-dash away from a tag. A generation token drops
+  // darts a tag or the end of the game cut short.
+  _pgTagRun(x = null) {
+    const tag = this._pgTag;
+    const pet = this._recessPet;
+    if (!tag || !pet?.active) return;
+    const gen = ++tag.gen;
+    tag.tw?.stop();
+    tag.timer?.remove(false);
+    const fast = x != null;
+    if (x == null) {
+      // Somewhere new, well away from here.
+      x = PG_FIELD.x0 + Math.random() * (PG_FIELD.x1 - PG_FIELD.x0);
+      if (Math.abs(x - pet.x) < 180) x = pet.x + (x < pet.x ? -180 : 180);
+      x = Phaser.Math.Clamp(x, PG_FIELD.x0, PG_FIELD.x1);
+    }
+    // Never stop on the "Field" label: the label's half width, the pet's at
+    // this size and a held cosmetic's reach, either side of it. A dash that
+    // would end there carries on past it, the way it was going.
+    const label = this._pgItems.field.label;
+    const keep = label.width / 2 + (this._gpHalfW(1) + PG_CARRY) * PG_FIELD.scale;
+    if (Math.abs(x - label.x) < keep) x = label.x + (x > pet.x ? keep : -keep);
+    const [lo, hi] = PG_FIELD.feet;
+    const feet = lo + Math.random() * (hi - lo);
+    const dist = Math.abs(x - pet.x);
+    tag.tw = this._pgDash(x, feet, (fast ? 180 : 280) + dist * (fast ? 0.5 : 0.9), () => {
+      if (tag.gen !== gen || this._pgTag !== tag) return;
+      // Nobody playing? After a good while it gives up and comes back.
+      if (++tag.darts > 10) { this._pgTagEnd(); return; }
+      tag.timer = this.time.delayedCall(380 + Math.random() * 380, () => {
+        if (tag.gen === gen && this._pgTag === tag) this._pgTagRun();
+      });
+    }, { hop: 8, stride: 44 });
+  }
+
+  // A tap on the pet during tag.
+  _pgTagged() {
+    const tag = this._pgTag;
+    const pet = this._recessPet;
+    if (!tag || tag.caught) return;
+    tag.hits++;
+    tag.darts = 0;
+    audio.playPetChirp?.();
+    if (tag.hits < 3) {
+      this._gpEmote('!', '#ff7a3a');
+      // The other way from where it was heading, unless that's the edge.
+      let dir = -this._gpFacing;
+      const reach = 260 + Math.random() * 160;
+      if (pet.x + dir * reach < PG_FIELD.x0 || pet.x + dir * reach > PG_FIELD.x1) dir = -dir;
+      this._pgTagRun(Phaser.Math.Clamp(pet.x + dir * reach, PG_FIELD.x0, PG_FIELD.x1));
+      return;
+    }
+    // Caught! A happy spin (quick turns on a hop), sparkles, then home.
+    tag.caught = true;
+    tag.gen++;
+    tag.tw?.stop();
+    tag.timer?.remove(false);
+    pet.y = this._pgDashY;
+    pet.angle = 0;
+    this._gpEmote('♥');
+    this._pgSparkles(3);
+    this._gpHop(2, 18);
+    let k = 0;
+    const turn = () => {
+      if (this._pgTag !== tag) return;
+      this._gpFace(-this._gpFacing);
+      if (++k < 7) this.time.delayedCall(90, turn);
+      else this.time.delayedCall(360, () => this._pgTagEnd());
+    };
+    turn();
+  }
+
+  // The game winds down and the pet heads back (a queued stop runs next).
+  _pgTagEnd() {
+    const tag = this._pgTag;
+    const pet = this._recessPet;
+    if (!tag || !pet?.active) return;
+    this._pgTag = null;
+    tag.gen++;
+    tag.tw?.stop();
+    tag.timer?.remove(false);
+    this.tweens.killTweensOf(pet);
+    this._pgTagHitBox(false);
+    pet.y = this._pgDashY;
+    pet.angle = 0;
+    this._pgFenceBack(tag.done);
+  }
+
+  // Across the grass to the fence, back over it onto the woodchips at full
+  // size, then down the gap column to row 1's ground line, so the routine
+  // hands the pet back on a walkway.
+  _pgFenceBack(done) {
+    const pet = this._recessPet;
+    // The game is over, so a Field tap from here on is a new game (petInteract).
+    this._pgRunning = null;
+    const toX = PG_FENCE.x + 40;
+    this._pgDash(toX, PG_FIELD.feet[1], 200 + Math.abs(toX - pet.x) * 0.7, () => {
+      this._gpFace(1);
+      this._gpJump(PG_FENCE.x, PG_FENCE.feet - this._gpFoot(1), 70, 560, () => {
+        this._gpPuffs(pet.x, PG_FENCE.feet, 0xd8b67e, 5, 44, 26);
+        this._gpSquash(() => this._pgWalk(PG_FENCE.x, PG_WALK_Y[0], done));
+      }, { scale: 1 });
+    });
+  }
+
+  // The pet's tap box grows for tag: at the field's smaller scale the usual
+  // box would be a hard target for a small finger.
+  _pgTagHitBox(big) {
+    const hit = this._pgPetHit;
+    if (!hit?.active) return;
+    const s = big ? 200 : 130;
+    hit.setSize(s, s);
+    hit.input?.hitArea?.setSize(s, s);
+  }
+
+  // Found-it celebration: models on showUnlockCelebration. `onDone` runs once
+  // the card is closed, however it's dismissed.
+  showRecessUnlock(onDone = null) {
     progress.clearHiddenWorld(18);
     cosmetics.addAndEquip('acc_dried_mango');
     audio.playMatch?.();
 
-    // Pet preview holding the freshly-equipped dried mango.
+    // However the card is dismissed, the pet shows the freshly equipped mango.
     return this.showFoundItCard({
       accent: 0x7ed957,
       ink: '#0a2a12',
       subtitle: 'You crossed the monkey bars!',
       unlocked: 'Unlocked: Dried Mango',
       buttonLabel: 'Awesome',
-      onButton: () => this.refreshRecessPet()
+      onClose: () => { this.refreshRecessPet(); onDone?.(); }
     });
   }
 
-  // Redraw the in-scene pet so the just-equipped medal shows up immediately.
+  // Redraw the in-scene pet so the just-equipped mango shows up right away.
   refreshRecessPet() {
     if (!this._recessPet?.active || !this._recessPetSprite) return;
     this._recessPetSprite.destroy();
     this._recessPetSprite = drawCompanion(this, 0, 0, { scale: 1.1 });
+    this._roomPetSprite = this._recessPetSprite;
+    // addAt(…, 0) keeps the pet below the transparent tap hit-rect.
     this._recessPet.addAt(this._recessPetSprite, 0);
+    this._gpFace(this._gpFacing);
   }
 
-
-  // Woodchips tap → a few chips scatter up and settle back.
-  scatterWoodchips(cx, cy) {
-    for (let i = 0; i < 7; i++) {
-      const chip = this.add.graphics().setDepth(10);
-      const tone = Math.random() < 0.5 ? 0xb38a52 : 0xddc294;
-      chip.fillStyle(tone, 1);
-      chip.fillRect(-5, -2, 10, 4);
-      chip.setPosition(cx + (Math.random() - 0.5) * 40, cy);
-      chip.rotation = Math.random() * Math.PI;
-      const dx = (Math.random() - 0.5) * 120;
-      const up = 40 + Math.random() * 50;
-      this.tweens.add({
-        targets: chip,
-        x: chip.x + dx,
-        duration: 520,
-        ease: 'Quad.easeOut',
-        onUpdate: (tw) => {
-          const p = tw.progress;
-          chip.y = cy - Math.sin(p * Math.PI) * up;
-          chip.rotation += 0.12;
-        },
-        onComplete: () => chip.destroy()
-      });
+  // ----------------------------------------------------------
+  // PLAYGROUND RIGS: the moving parts each stop's routine plays with, hung on
+  // node.pgParts. Front pieces are redraws of an object's near side, hidden
+  // until the pet is tucked in behind them, so they never double up the art.
+  // ----------------------------------------------------------
+  _pgRig(id, node) {
+    switch (id) {
+      case 'tower':
+        node.pgParts = { front: this._pgPiece(node, drawTowerFront, false) };
+        return;
+      case 'slide':
+        node.pgParts = { front: this._pgPiece(node, drawSlideFront, false) };
+        return;
+      case 'bars':
+        node.pgParts = { front: this._pgPiece(node, drawMonkeyBarsFront, false) };
+        return;
+      case 'zipline': {
+        // Trolley, ropes and grip roll along the rail as one; the grip is its
+        // own piece so the pet can hang behind it.
+        const trolley = this.add.container(PG_ZIP.restX, zipRailY(PG_ZIP.restX));
+        this._pgPiece(trolley, drawZipRopes);
+        this._pgPiece(trolley, drawZipTrolley);
+        const grip = this._pgPiece(trolley, drawZipGrip);
+        node.add(trolley);
+        node.pgParts = { trolley, grip };
+        return;
+      }
+      case 'tire': {
+        // Chains and tire hang from the top bar and swing as one piece.
+        const swing = this.add.container(0, PG_TIRE.pivotY);
+        this._pgPiece(swing, drawTireSwingTire);
+        const front = this._pgPiece(swing, drawTireFront, false);
+        node.add(swing);
+        node.pgParts = { swing, front };
+        return;
+      }
+      case 'spinner': {
+        // The disc sits on the post; its grip dots show which way it's turned.
+        this._pgPiece(node, drawSpinnerDisc);
+        const dots = this.add.graphics();
+        node.add(dots);
+        const parts = { phase: 0.5 };
+        parts.turn = (a) => { parts.phase = a; drawSpinnerDots(dots, a); };
+        parts.turn(parts.phase);
+        node.pgParts = parts;
+        return;
+      }
     }
   }
 
@@ -3631,21 +4588,106 @@ function drawFenceStrip(bg, y, h) {
   for (let px = 40; px < W; px += 200) bg.fillRect(px, y - 6, 6, h + 10);
 }
 
-// Composite play tower — red posts, decks, green peaked roof, yellow panel.
+// ----- Playground layout (scene coordinates) -----
+// Ground lines for the three rows of equipment. Each object's node sits its
+// renderer's `foot` above its row's line and its label hangs PG_LABEL_DROP
+// under it, so the labels in a row line up. Row 3's line puts the spinner's
+// label level with the "Dad's notes" board's.
+const PG_GROUND = { row1: 1046, row2: 1440, row3: 1708 };
+const PG_LABEL_DROP = 24;
+const PG_TRACK_TOP = H - 178;
+// Every stop and the notes board breathe between scale 1 and this.
+const PG_BREATHE = 1.03;
+// A finger's margin around each stop's drawn art in its tap box.
+const PG_HIT_PAD = 16;
+// Dad's notes board on the woodchips (its ground line is 124 under this).
+const PG_NOTES = { x: 560, y: 1600 };
+// Extra off-screen room in the track wrap, for a held cosmetic poking out
+// past the body: the Dried Mango reaches about 70px past an ember adult's
+// side, and the run's lean and hops swing it a little further.
+const PG_CARRY = 110;
+// Half the widest pet's width in the room: pets are drawn in 6px cells and
+// the room pet at 1.1 (the same sum as _gpHalfW(1)).
+const PG_WIDEST_HALF_W = Math.max(...Object.values(PET_SPRITES)
+  .flatMap(stages => Object.values(stages).map(grid => grid[0].length))) * 6 / 2 * 1.1;
+// The pet's home: on the timber edge of the running track, right of the notes
+// board, far enough right that the widest pet facing the board, holding a
+// Dried Mango on that side, clears the board at the top of its breathing.
+const PG_HOME = {
+  x: Math.ceil(PG_NOTES.x + NOTES_BOARD.halfW * PG_BREATHE + PG_WIDEST_HALF_W + PG_CARRY),
+  feet: 1724
+};
+// Walkways. The pet walks along these ground lines (row 1, row 2, the track's
+// edge) and gets between them only through the open gaps: past the end of the
+// big slide (x 650) and down the woodchips right of Dad's notes (x 790).
+const PG_WALK_Y = [PG_GROUND.row1, PG_GROUND.row2, PG_HOME.feet];
+const PG_WALK_X = [650, 790];
+// Where the pet hops the fence onto the field, from the woodchips side.
+const PG_FENCE = { x: 650, feet: 700 };
+// The tag game: the pet's size out on the field (it reads as far away), the
+// band its feet stay in (clear of the top bubble, above the fence) and its x range.
+const PG_FIELD = { scale: 0.65, feet: [588, 622], x0: 90, x1: 990 };
+
+// Composite play tower: red posts, decks, green peaked roof, yellow panel, a
+// ladder up the left bay and a railing along the top deck.
 function drawPlayStructure(g) {
   g.fillStyle(0x000000, 0.18); g.fillEllipse(0, 200, 240, 30);
   g.fillStyle(0xd6342b, 1);
   for (const px of [-110, -40, 40, 110]) g.fillRect(px - 7, -150, 14, 350);
+  g.fillStyle(0xe85a52, 1);
+  for (const ry of [164, 128, 92, 56, -8]) g.fillRect(-103, ry, 56, 8);
   g.fillStyle(0x2f6ea0, 1); g.fillRoundedRect(-120, 20, 240, 26, 6);
-  g.fillStyle(0x3a8044, 1); g.fillRoundedRect(-120, -60, 240, 24, 6);
   g.fillStyle(0x3aa0c0, 1); g.fillRect(-120, -30, 8, 50); g.fillRect(112, -30, 8, 50);
   g.fillStyle(0x2f8a4a, 1); g.fillTriangle(0, -210, -90, -150, 90, -150);
   g.fillStyle(0x37a257, 1); g.fillTriangle(0, -196, -70, -152, 70, -152);
   g.fillStyle(0xf2c43a, 1); g.fillRoundedRect(-30, 70, 60, 84, 8);
   g.fillStyle(0x2f6ea0, 1); for (const hx of [-16, 0, 16]) g.fillCircle(hx, 112, 6);
+  drawTowerFront(g);
 }
 
-// A nice, thick playground slide — red ladder/tower on the left, a smooth wide
+// The top deck and its railing (top rail at y -110): drawn with the tower, and
+// again as the front piece the pet peeks over.
+function drawTowerFront(g) {
+  g.fillStyle(0x3a8044, 1); g.fillRoundedRect(-120, -60, 240, 24, 6);
+  g.fillStyle(0x3aa0c0, 1);
+  for (let bx = -108; bx <= 108; bx += 24) g.fillRect(bx - 3, -102, 6, 42);
+  g.fillRoundedRect(-124, -110, 248, 10, 4);
+}
+
+// The big slide's chute, in the slide's own coordinates: a smoothstep
+// centreline from the top platform down to the run-out lip, SLIDE_HALF wide on
+// each side. Shared by the renderer and the pet's ride, so the ride stays in it.
+const SLIDE_HALF = 30;
+function slideAt(t) {
+  return { x: -70 + 168 * t, y: -176 + 330 * (t * t * (3 - 2 * t)) };
+}
+function slideAngle(t) {
+  const a = slideAt(Math.max(0, t - 0.001)), b = slideAt(Math.min(1, t + 0.001));
+  return Math.atan2(b.y - a.y, b.x - a.x);
+}
+// Points along the chute `off` px to its upper side (negative: the near side).
+function slideEdge(off, N = 26) {
+  const pts = [];
+  for (let i = 0; i <= N; i++) {
+    const t = i / N, c = slideAt(t), a = slideAngle(t);
+    pts.push([c.x + Math.sin(a) * off, c.y - Math.cos(a) * off]);
+  }
+  return pts;
+}
+function fillBetweenEdges(g, a, b, color) {
+  g.fillStyle(color, 1);
+  g.beginPath(); g.moveTo(a[0][0], a[0][1]);
+  for (const p of a) g.lineTo(p[0], p[1]);
+  for (let i = b.length - 1; i >= 0; i--) g.lineTo(b[i][0], b[i][1]);
+  g.closePath(); g.fillPath();
+}
+function strokeEdge(g, pts) {
+  g.beginPath(); g.moveTo(pts[0][0], pts[0][1]);
+  for (const p of pts) g.lineTo(p[0], p[1]);
+  g.strokePath();
+}
+
+// A nice, thick playground slide: red ladder/tower on the left, a smooth wide
 // blue chute sweeping down to the right with raised side rails + a run-out lip.
 function drawWavySlide(g) {
   g.fillStyle(0x000000, 0.16); g.fillEllipse(30, 188, 210, 26);
@@ -3658,54 +4700,71 @@ function drawWavySlide(g) {
   // top platform
   g.fillStyle(0x2f6ea0, 1); g.fillRoundedRect(-126, -198, 96, 22, 5);
 
-  // smooth thick chute: parametric centerline → offset upper/lower edges
-  const N = 26, half = 30;
-  const cx = (t) => -70 + 168 * t;
-  const cy = (t) => -176 + 330 * (t * t * (3 - 2 * t));      // smoothstep down
-  const ang = (t) => Math.atan2(
-    cy(Math.min(1, t + 0.001)) - cy(Math.max(0, t - 0.001)),
-    cx(Math.min(1, t + 0.001)) - cx(Math.max(0, t - 0.001)));
-  const edge = (off) => {
-    const pts = [];
-    for (let i = 0; i <= N; i++) { const t = i / N, a = ang(t); pts.push([cx(t) + Math.sin(a) * off, cy(t) - Math.cos(a) * off]); }
-    return pts;
-  };
-  const upper = edge(half), lower = edge(-half), inner = edge(half * 0.4);
-  const fillBetween = (a, b, color) => {
-    g.fillStyle(color, 1);
-    g.beginPath(); g.moveTo(a[0][0], a[0][1]);
-    for (const p of a) g.lineTo(p[0], p[1]);
-    for (let i = b.length - 1; i >= 0; i--) g.lineTo(b[i][0], b[i][1]);
-    g.closePath(); g.fillPath();
-  };
-  fillBetween(upper, lower, 0x2f78c8);     // bed
-  fillBetween(upper, inner, 0x6fb3ef);     // bright top surface
+  // smooth thick chute: the centreline offset to its upper and lower edges
+  const upper = slideEdge(SLIDE_HALF), lower = slideEdge(-SLIDE_HALF), inner = slideEdge(SLIDE_HALF * 0.4);
+  fillBetweenEdges(g, upper, lower, 0x2f78c8);     // bed
+  fillBetweenEdges(g, upper, inner, 0x6fb3ef);     // bright top surface
   // raised side rails
   g.lineStyle(8, 0x1f5a99, 1);
-  g.beginPath(); g.moveTo(upper[0][0], upper[0][1]); for (const p of upper) g.lineTo(p[0], p[1]); g.strokePath();
-  g.beginPath(); g.moveTo(lower[0][0], lower[0][1]); for (const p of lower) g.lineTo(p[0], p[1]); g.strokePath();
+  strokeEdge(g, upper);
+  strokeEdge(g, lower);
   // run-out lip
   g.fillStyle(0x2f6ea0, 1); g.fillRoundedRect(70, 150, 64, 16, 6);
 }
 
-// Tire swing — red A-frame with a black tire on chains (hole shows woodchips).
-function drawTireSwing(g) {
+// The chute's near half and near rail, the front piece the riding pet sits
+// down behind.
+function drawSlideFront(g) {
+  const lower = slideEdge(-SLIDE_HALF);
+  fillBetweenEdges(g, slideEdge(0), lower, 0x2f78c8);
+  g.lineStyle(8, 0x1f5a99, 1);
+  strokeEdge(g, lower);
+}
+
+// Tire swing: a red A-frame (this renderer) with a black tire on chains
+// hanging from the top bar (drawTireSwingTire, in its own swinging piece).
+// PG_TIRE: the pivot on the top bar, in the frame's coordinates, and how low
+// the pet sits in the tire's hole, in the swinging piece's.
+const PG_TIRE = { pivotY: -146, seatY: 248 };
+function drawTireSwingFrame(g) {
   g.fillStyle(0x000000, 0.16); g.fillEllipse(0, 182, 150, 24);
   g.lineStyle(14, 0xd6342b, 1);
   g.lineBetween(-104, 176, -46, -148);     // splayed legs
   g.lineBetween(104, 176, 46, -148);
   g.lineStyle(15, 0xc02d24, 1);
   g.lineBetween(-58, -150, 58, -150);       // top bar
-  g.lineStyle(4, 0x8a8a96, 1);              // chains
-  g.lineBetween(-20, -146, -20, 34);
-  g.lineBetween(20, -146, 20, 34);
-  g.lineBetween(0, -146, 0, 30);
-  g.fillStyle(0x17171c, 1); g.fillCircle(0, 82, 56);       // tire
-  g.fillStyle(0xc7a06a, 1); g.fillCircle(0, 82, 28);       // hole → woodchips
+}
+
+// Chains from one swivel on the top bar down to the tire (hole shows woodchips).
+// Origin at the pivot; the tire's center is 228 below it.
+function drawTireSwingTire(g) {
+  const cy = 228;
+  g.lineStyle(4, 0x8a8a96, 1);
+  g.lineBetween(0, 2, -22, cy - 50);
+  g.lineBetween(0, 2, 22, cy - 50);
+  g.lineBetween(0, 2, 0, cy - 56);
+  g.fillStyle(0x6a6a74, 1); g.fillCircle(0, 2, 6);
+  g.fillStyle(0x17171c, 1); g.fillCircle(0, cy, 56);        // tire
+  g.fillStyle(0xc7a06a, 1); g.fillCircle(0, cy, 28);        // hole → woodchips
   g.fillStyle(0x0d0d11, 1);
-  for (let i = 0; i < 12; i++) { const a = i / 12 * Math.PI * 2; g.fillCircle(Math.cos(a) * 47, 82 + Math.sin(a) * 47, 4.5); }
-  g.lineStyle(3, 0x39393f, 1); g.strokeCircle(0, 82, 56); g.strokeCircle(0, 82, 28);
-  g.fillStyle(0xffffff, 0.12); g.fillEllipse(-18, 64, 26, 12);
+  for (let i = 0; i < 12; i++) { const a = i / 12 * Math.PI * 2; g.fillCircle(Math.cos(a) * 47, cy + Math.sin(a) * 47, 4.5); }
+  g.lineStyle(3, 0x39393f, 1); g.strokeCircle(0, cy, 56); g.strokeCircle(0, cy, 28);
+  g.fillStyle(0xffffff, 0.12); g.fillEllipse(-18, cy - 18, 26, 12);
+}
+
+// The tire's lower half, the front piece the pet sits down behind.
+function drawTireFront(g) {
+  const cy = 228;
+  g.fillStyle(0x17171c, 1);
+  g.beginPath();
+  g.arc(0, cy, 56, 0, Math.PI, false);
+  g.arc(0, cy, 28, Math.PI, 0, true);
+  g.closePath(); g.fillPath();
+  g.fillStyle(0x0d0d11, 1);
+  for (let i = 1; i < 6; i++) { const a = i / 12 * Math.PI * 2; g.fillCircle(Math.cos(a) * 47, cy + Math.sin(a) * 47, 4.5); }
+  g.lineStyle(3, 0x39393f, 1);
+  g.beginPath(); g.arc(0, cy, 56, 0, Math.PI, false); g.strokePath();
+  g.beginPath(); g.arc(0, cy, 28, 0, Math.PI, false); g.strokePath();
 }
 
 // Full-width blue running track band along the bottom (drawn on the backdrop).
@@ -3735,34 +4794,62 @@ function drawClimbingWall(g) {
   for (const [hx, hy, hc] of holds) { g.fillStyle(hc, 1); g.fillCircle(hx, hy, 9); g.fillStyle(0xffffff, 0.5); g.fillCircle(hx - 2, hy - 2, 3); }
 }
 
-// Zip line / track ride — an overhead rail with a rolling trolley + a handle
-// the kids grab and slide across.
-function drawZipLine(g) {
+// The climbing wall's holds the pet climbs, bottom to top (hold centers from
+// drawClimbingWall).
+const PG_WALL_HOLDS = [[-25, 100], [20, 60], [-55, 40], [-20, -20], [55, -10], [30, -70], [-50, -80]];
+
+// Zip line: two red end posts and the rail (this renderer), with a trolley,
+// ropes and a grip bar that roll along it (the pieces below, in trolley
+// coordinates, origin on the rail). The right post is taller, so the rail runs
+// downhill to the left and rides go right to left: from rest at the high end
+// (restX) to the stop at the low end (stopX). gripX/gripY: the grip's middle.
+const PG_ZIP = { restX: 84, stopX: -84, gripX: 0, gripY: 93 };
+function zipRailY(x) {
+  return -76 - 32 * (x + 122) / 244;
+}
+function drawZipLineFrame(g) {
   g.fillStyle(0x000000, 0.16); g.fillEllipse(0, 110, 220, 22);
-  // two red end posts (right slightly taller — the cable rides downhill)
-  g.fillStyle(0xd6342b, 1); g.fillRect(-128, -96, 14, 206); g.fillRect(114, -110, 14, 220);
-  g.fillStyle(0xc02d24, 1); g.fillRect(-128, -96, 14, 30); g.fillRect(114, -110, 14, 30);
+  g.fillStyle(0xd6342b, 1); g.fillRect(-128, -86, 14, 196); g.fillRect(114, -118, 14, 228);
+  g.fillStyle(0xc02d24, 1); g.fillRect(-128, -86, 14, 30); g.fillRect(114, -118, 14, 30);
   // top rail / cable
-  g.lineStyle(7, 0x7a828c, 1); g.lineBetween(-122, -86, 122, -100);
-  g.lineStyle(2, 0xb6bcc4, 1); g.lineBetween(-122, -89, 122, -103);
-  // trolley on the rail
-  g.fillStyle(0x3a3f47, 1); g.fillRoundedRect(-28, -102, 56, 20, 5);
-  g.fillStyle(0x9aa0aa, 1); g.fillCircle(-15, -84, 6); g.fillCircle(15, -84, 6);
-  // ropes down to a grip handle
-  g.lineStyle(5, 0x2f6ea0, 1); g.lineBetween(-13, -82, -16, 18); g.lineBetween(13, -82, 16, 18);
-  // yellow grip bar
-  g.fillStyle(0xf2c43a, 1); g.fillRoundedRect(-30, 14, 60, 18, 9);
-  g.lineStyle(3, 0xd99a1f, 1); g.strokeRoundedRect(-30, 14, 60, 18, 9);
+  g.lineStyle(7, 0x7a828c, 1); g.lineBetween(-122, zipRailY(-122), 122, zipRailY(122));
+  g.lineStyle(2, 0xb6bcc4, 1); g.lineBetween(-122, zipRailY(-122) - 3, 122, zipRailY(122) - 3);
+}
+function drawZipTrolley(g) {
+  g.fillStyle(0x3a3f47, 1); g.fillRoundedRect(-28, -14, 56, 20, 5);
+  g.fillStyle(0x9aa0aa, 1); g.fillCircle(-15, 4, 6); g.fillCircle(15, 4, 6);
+}
+function drawZipRopes(g) {
+  g.lineStyle(5, 0x2f6ea0, 1); g.lineBetween(-13, 6, -16, 86); g.lineBetween(13, 6, 16, 86);
+}
+function drawZipGrip(g) {
+  g.fillStyle(0xf2c43a, 1); g.fillRoundedRect(-30, 84, 60, 18, 9);
+  g.lineStyle(3, 0xd99a1f, 1); g.strokeRoundedRect(-30, 84, 60, 18, 9);
 }
 
-// Blue disc spinner-seat on a red post.
-function drawSpinnerSeat(g) {
+// Spinner: a red post (this renderer) under a blue disc (drawSpinnerDisc). The
+// disc is seen from the side, so it turns by its grip dots running round the
+// rim (drawSpinnerDots), never by rotating the picture.
+function drawSpinnerPost(g) {
   g.fillStyle(0x000000, 0.16); g.fillEllipse(0, 95, 90, 18);
   g.fillStyle(0xd6342b, 1); g.fillRect(-8, -10, 16, 105);
+}
+function drawSpinnerDisc(g) {
   g.fillStyle(0x1f5a99, 1); g.fillEllipse(0, -10, 120, 20);
   g.fillStyle(0x2f78c8, 1); g.fillEllipse(0, -22, 120, 40);
   g.fillStyle(0x3a86d8, 1); g.fillEllipse(0, -28, 110, 30);
   g.fillStyle(0xffffff, 0.4); g.fillEllipse(-24, -32, 40, 12);
+}
+// Three grip dots round the disc's top at turn `a` (radians); the near side's
+// dots are bigger and brighter.
+function drawSpinnerDots(g, a) {
+  g.clear();
+  for (let i = 0; i < 3; i++) {
+    const b = a + i * Math.PI * 2 / 3;
+    const near = Math.sin(b) > 0;
+    g.fillStyle(i === 1 ? 0xf2c43a : 0xff5b6e, near ? 1 : 0.7);
+    g.fillCircle(Math.cos(b) * 44, -28 + Math.sin(b) * 10, near ? 6 : 4.5);
+  }
 }
 
 // Dad's notes board: a parchment notice board on two wooden posts. Headers and
@@ -3794,14 +4881,24 @@ function drawDadNotesBoard(g) {
   }
 }
 
-// Monkey bars — the hidden gem. Horizontal overhead ladder on tall red posts.
+// Monkey bars: the hidden gem. Horizontal overhead ladder on tall red posts.
+// The pet swings along these rungs (x) hanging from the lower rail.
+const PG_BAR_RUNGS = [-140, -100, -60, -20, 20, 60, 100, 140];
 function drawMonkeyBars(g) {
   g.fillStyle(0x000000, 0.18); g.fillEllipse(0, 172, 300, 28);
   g.fillStyle(0xd6342b, 1); g.fillRect(-160, -120, 16, 290); g.fillRect(144, -120, 16, 290);
   g.fillStyle(0xd6342b, 1); g.fillRect(-160, -120, 320, 14); g.fillRect(-160, -98, 320, 10);
   g.fillStyle(0xe85a52, 1);
-  for (let rx = -140; rx <= 140; rx += 40) g.fillRect(rx - 5, -118, 10, 30);
+  for (const rx of PG_BAR_RUNGS) g.fillRect(rx - 5, -118, 10, 30);
   g.fillStyle(0xfff3b8, 0.9); g.fillCircle(0, -150, 4); g.fillCircle(70, -140, 3); g.fillCircle(-80, -138, 3);
+}
+
+// The lower rail and the rungs' ends on it: the front piece the hanging pet's
+// hands go behind.
+function drawMonkeyBarsFront(g) {
+  g.fillStyle(0xd6342b, 1); g.fillRect(-160, -98, 320, 10);
+  g.fillStyle(0xe85a52, 1);
+  for (const rx of PG_BAR_RUNGS) g.fillRect(rx - 5, -98, 10, 10);
 }
 
 // Small map icon for the "King Coli" germ boss — a round green germ head with
@@ -4975,121 +6072,160 @@ function drawPrintedToy(g) {
   g.fillTriangle(9, -6, 9, -18, 16, -2);
 }
 
-// 7. Premium bassinet stroller — side profile. Tan bassinet with black hood,
-// chrome-accent A-frame, big rear wheel + smaller front wheel.
+// 7. All-black full-size stroller with the toddler seat, side profile. Handle
+// and canopy on the left, open front on the right. A lambda frame: one long
+// straight tube from the rear axle up and back to the telescoping handlebar,
+// and a shorter front leg from the small front wheel up to the fold hub. The
+// seat sits on the hub facing forward, the big basket hangs between the legs.
+// The ground line is y 120. The wheels are drawn by _strollerRock (their own
+// pieces, so they turn when the stroller rolls).
+const STROLLER = {
+  rear: { x: -72, y: 88, r: 32 },     // 1.4x the front wheel, like the real one
+  front: { x: 98, y: 97, r: 23 },
+  handle: { x: -116, y: -148 },       // top of the rear tube, under y 790 in the room
+  hub: { x: -90, y: -12 },            // fold hub, about 42% of the way up the tube
+  seatY: -12,                         // top of the seat cushion
+  barY: -54,                          // bumper bar
+  seatFrontX: -6
+};
+const STROLLER_FRAME = 0x1a1b1f;      // carbon, near black
+const STROLLER_FABRIC = 0x34353c;     // charcoal black, a touch lighter than the frame
+const STROLLER_LEATHER = 0x0d0d0f;
+
 function drawUppababyVista(g) {
+  const S = STROLLER;
   // Ground shadow
   g.fillStyle(0x000000, 0.45);
-  g.fillEllipse(0, 120, 290, 16);
+  g.fillEllipse(8, 120, 250, 16);
 
-  // FRAME — rear-tilted A with chrome highlights
-  g.lineStyle(9, 0x14141a, 1);
-  g.lineBetween(-100, 100, -10, -50);   // rear strut
-  g.lineBetween(90, 95, 30, -50);       // front strut
-  g.lineBetween(-100, 100, 90, 95);     // lower cross brace
-  // Chrome sheen on each tube
-  g.lineStyle(2, 0xb0b0bc, 0.6);
-  g.lineBetween(-95, 95, -8, -46);
-  g.lineBetween(87, 92, 32, -46);
-  // Frame joint pivots (silver pucks)
-  g.fillStyle(0xcdcdd4, 1);
-  g.fillCircle(-10, -50, 6);
-  g.fillCircle(30, -50, 6);
-  g.fillStyle(0x2a2a32, 1);
-  g.fillCircle(-10, -50, 2.5);
-  g.fillCircle(30, -50, 2.5);
+  // BASKET: big, black, slung under the seat between the legs.
+  g.fillStyle(0x1f2024, 1);
+  g.fillPoints([
+    { x: -66, y: 24 }, { x: 52, y: 24 }, { x: 44, y: 80 },
+    { x: 36, y: 86 }, { x: -50, y: 86 }, { x: -58, y: 80 }
+  ], true);
+  g.fillStyle(0x2c2d33, 1);
+  g.fillRoundedRect(-68, 20, 122, 8, 3);
+  // Fabric seams, so it reads as a soft bin and not a box
+  g.lineStyle(2, 0x2c2d33, 1);
+  g.lineBetween(-56, 50, 46, 50);
+  g.lineBetween(-20, 28, -18, 84);
+  g.lineBetween(16, 28, 14, 84);
+  // Strap up to the seat frame
+  g.lineStyle(3, STROLLER_FRAME, 1);
+  g.lineBetween(-62, 22, -80, -6);
 
-  // Handle bar diagonal — extends up-back from rear strut top
-  g.lineStyle(10, 0x14141a, 1);
-  g.lineBetween(-10, -50, -55, -90);
-  // Leather grip wrap (UPPAbaby signature)
-  g.fillStyle(0x6e4a28, 1);
-  g.fillRoundedRect(-78, -98, 36, 14, 6);
-  // Stitching detail on grip
-  g.lineStyle(1, 0xc09060, 0.8);
-  g.lineBetween(-75, -94, -45, -94);
-  g.lineBetween(-75, -90, -45, -90);
+  // FRONT LEG: front axle up to the fold hub.
+  g.lineStyle(9, STROLLER_FRAME, 1);
+  g.lineBetween(S.front.x, S.front.y, S.hub.x, S.hub.y);
+  g.lineStyle(2, 0x4b4d57, 0.8);
+  g.lineBetween(S.front.x - 4, S.front.y - 6, S.hub.x + 6, S.hub.y - 4);
 
-  drawStrollerBassinet(g);
+  // SEAT BACK: reclines a little, under the canopy.
+  g.fillStyle(0x2a2b31, 1);
+  g.fillPoints([
+    { x: -80, y: -14 }, { x: -98, y: -8 }, { x: -114, y: -94 }, { x: -98, y: -100 }
+  ], true);
+  // Seat cushion
+  g.fillStyle(STROLLER_FABRIC, 1);
+  g.fillRoundedRect(-92, -22, 88, 14, 6);
 
-  // WHEELS: big rear, smaller front, with chrome rims
-  // Rear wheel
-  g.fillStyle(0x14141a, 1);
-  g.fillCircle(-100, 100, 28);
-  g.lineStyle(2, 0x3a3a44, 1);
-  g.strokeCircle(-100, 100, 28);
-  // Chrome rim ring
-  g.fillStyle(0xcdcdd4, 1);
-  g.fillCircle(-100, 100, 11);
-  g.fillStyle(0x14141a, 1);
-  g.fillCircle(-100, 100, 3.5);
-  // Spokes (chrome)
-  g.lineStyle(2, 0xcdcdd4, 0.95);
-  for (let i = 0; i < 5; i++) {
-    const a = (i / 5) * Math.PI * 2;
-    g.lineBetween(-100, 100, -100 + Math.cos(a) * 24, 100 + Math.sin(a) * 24);
-  }
-  // Front wheel
-  g.fillStyle(0x14141a, 1);
-  g.fillCircle(90, 95, 22);
-  g.lineStyle(2, 0x3a3a44, 1);
-  g.strokeCircle(90, 95, 22);
-  g.fillStyle(0xcdcdd4, 1);
-  g.fillCircle(90, 95, 9);
-  g.fillStyle(0x14141a, 1);
-  g.fillCircle(90, 95, 3);
-  g.lineStyle(2, 0xcdcdd4, 0.95);
-  for (let i = 0; i < 5; i++) {
-    const a = (i / 5) * Math.PI * 2;
-    g.lineBetween(90, 95, 90 + Math.cos(a) * 18, 95 + Math.sin(a) * 18);
-  }
+  // CANOPY: the big hood arching over the seat back, open to the front.
+  const cx = -68, cy = -54, cr = 66;
+  g.fillStyle(0x303137, 1);
+  g.beginPath();
+  g.arc(cx, cy, cr, Phaser.Math.DegToRad(188), Phaser.Math.DegToRad(335), false);
+  g.lineTo(-78, -52);
+  g.closePath();
+  g.fillPath();
+  // Pop-out visor along the front edge
+  g.lineStyle(6, 0x26272c, 1);
+  g.lineBetween(cx + Math.cos(Phaser.Math.DegToRad(335)) * cr, cy + Math.sin(Phaser.Math.DegToRad(335)) * cr, -78, -52);
+  // One soft highlight on the dome
+  g.lineStyle(6, 0xffffff, 0.12);
+  g.beginPath();
+  g.arc(cx, cy, cr - 10, Phaser.Math.DegToRad(222), Phaser.Math.DegToRad(292), false);
+  g.strokePath();
+  // Mesh peekaboo window on top
+  g.fillStyle(0x56606a, 0.85);
+  g.fillRoundedRect(-84, -116, 24, 7, 3);
+
+  drawStrollerSeatFront(g);
+
+  // REAR LEG + HANDLEBAR: one straight tube from the rear axle to the top.
+  const tube = t => ({ x: S.rear.x + (S.handle.x - S.rear.x) * t, y: S.rear.y + (S.handle.y - S.rear.y) * t });
+  const collar = tube(0.76), wrap = tube(0.9);
+  g.lineStyle(10, STROLLER_FRAME, 1);
+  g.lineBetween(S.rear.x, S.rear.y, collar.x, collar.y);
+  // Telescoping top section, a shade lighter, with its adjuster collar
+  g.lineStyle(8, 0x26272d, 1);
+  g.lineBetween(collar.x, collar.y, S.handle.x, S.handle.y);
+  g.fillStyle(0x3a3c44, 1);
+  g.fillCircle(collar.x, collar.y, 7);
+  g.lineStyle(2, 0x4b4d57, 0.8);
+  g.lineBetween(S.rear.x - 5, S.rear.y - 8, collar.x - 4, collar.y + 2);
+  // Black leather wrap and the grip, seen end on
+  g.lineStyle(13, STROLLER_LEATHER, 1);
+  g.lineBetween(wrap.x, wrap.y, S.handle.x, S.handle.y);
+  g.fillStyle(STROLLER_LEATHER, 1);
+  g.fillCircle(S.handle.x, S.handle.y, 9);
+  g.lineStyle(1.5, 0x55555c, 0.9);
+  g.lineBetween(wrap.x - 3, wrap.y, S.handle.x - 4, S.handle.y + 2);
+  g.fillStyle(0xffffff, 0.18);
+  g.fillCircle(S.handle.x - 2, S.handle.y - 3, 3);
+
+  // Fold hub where the legs meet
+  g.fillStyle(0x3a3c44, 1);
+  g.fillCircle(S.hub.x, S.hub.y, 10);
+  g.fillStyle(0x6d6f78, 1);
+  g.fillCircle(S.hub.x, S.hub.y, 5);
 }
 
-// Stroller bassinet + hood. Also redrawn as the front piece the pet snuggles
-// down behind (see _strollerRock), so only its head shows over the rim.
-function drawStrollerBassinet(g) {
-  // BASSINET — tan curved pod with leather accent strip
-  // Body
-  g.fillStyle(0xb88f5c, 1);
-  g.fillRoundedRect(-70, -50, 130, 50, 16);
-  // Soften bottom curve (subtle wider ellipse blends into rounded rect)
-  g.fillEllipse(-5, -2, 130, 14);
-  // Top rim (lighter cream band)
-  g.fillStyle(0xd4b58a, 1);
-  g.fillRoundedRect(-70, -54, 130, 12, 8);
-  // Rim top highlight
-  g.fillStyle(0xefd1a8, 0.85);
-  g.fillRoundedRect(-66, -52, 122, 3, 2);
-  // Leather accent strip (signature horizontal band)
-  g.fillStyle(0x4a3018, 1);
-  g.fillRoundedRect(-58, -18, 110, 8, 3);
-  // Strip stitching
-  g.lineStyle(1, 0xc09060, 0.7);
-  g.lineBetween(-54, -14, 48, -14);
-  // Small leather label patch
-  g.fillStyle(0x8a5828, 1);
-  g.fillRoundedRect(20, -8, 22, 6, 2);
+// The toddler seat's near side, footrest and leather bumper bar. Also redrawn
+// as the front piece the pet sits up behind (see _strollerRock), so its head
+// and shoulders show over the bar.
+function drawStrollerSeatFront(g) {
+  const S = STROLLER;
+  // Footrest, angled down and forward under the seat front
+  g.fillStyle(0x26272c, 1);
+  g.fillPoints([
+    { x: S.seatFrontX - 8, y: -10 }, { x: S.seatFrontX + 4, y: -12 },
+    { x: S.seatFrontX + 24, y: 20 }, { x: S.seatFrontX + 12, y: 25 }
+  ], true);
+  // Seat side panel
+  g.fillStyle(STROLLER_FABRIC, 1);
+  g.fillRoundedRect(-92, -44, S.seatFrontX + 92, 38, { tl: 6, tr: 10, bl: 8, br: 14 });
+  g.fillStyle(0xffffff, 0.08);
+  g.fillRoundedRect(-86, -40, S.seatFrontX + 76, 5, 2);
+  // Bumper bar: the arm down to the seat frame, then the bar across the front
+  g.lineStyle(5, STROLLER_FRAME, 1);
+  g.lineBetween(-80, S.barY + 4, -86, -24);
+  g.lineStyle(9, STROLLER_LEATHER, 1);
+  g.lineBetween(-80, S.barY + 4, S.seatFrontX, S.barY);
+  g.fillStyle(STROLLER_LEATHER, 1);
+  g.fillCircle(S.seatFrontX, S.barY, 6);
+  g.lineStyle(1.5, 0x55555c, 0.9);
+  g.lineBetween(-74, S.barY + 2, S.seatFrontX - 4, S.barY - 1);
+}
 
-  // HOOD — smooth black dome over rear half of bassinet
-  g.fillStyle(0x14141a, 1);
-  g.beginPath();
-  g.arc(-30, -50, 48, Math.PI, Math.PI * 2);
-  g.fillPath();
-  // Hood rib stitches (concentric arcs)
-  g.lineStyle(2, 0x2a2a32, 1);
-  for (const r of [40, 30, 20]) {
-    g.beginPath();
-    g.arc(-30, -50, r, Math.PI, Math.PI * 2);
-    g.strokePath();
+// One stroller wheel centred on (0, 0): black foam tyre, black rim, grey hub.
+// Five grey spokes so the turn shows when it rolls.
+function drawStrollerWheel(g, r) {
+  g.fillStyle(0x141416, 1);
+  g.fillCircle(0, 0, r);
+  g.lineStyle(3, 0x2d2d33, 1);
+  g.strokeCircle(0, 0, r - 4);
+  g.fillStyle(0x222328, 1);
+  g.fillCircle(0, 0, r * 0.66);
+  g.lineStyle(r * 0.11, 0x6d6f78, 1);
+  for (let i = 0; i < 5; i++) {
+    const a = (i / 5) * Math.PI * 2;
+    g.lineBetween(0, 0, Math.cos(a) * r * 0.62, Math.sin(a) * r * 0.62);
   }
-  // Hood subtle top sheen
-  g.fillStyle(0xffffff, 0.10);
-  g.fillEllipse(-30, -90, 40, 6);
-  // Peek-a-boo window (small mesh panel at top)
-  g.fillStyle(0x4a6a7a, 0.8);
-  g.fillRoundedRect(-40, -94, 20, 7, 2);
-  g.lineStyle(1, 0x8a9aa6, 0.5);
-  g.lineBetween(-38, -91, -22, -91);
+  g.fillStyle(0x9a9ca5, 1);
+  g.fillCircle(0, 0, r * 0.26);
+  g.fillStyle(0x2a2b30, 1);
+  g.fillCircle(0, 0, r * 0.1);
 }
 
 // 8. Three kids' bicycles, scaled and tilted slightly.
@@ -5269,110 +6405,117 @@ function drawEbikeSeatFront(g) {
   g.fillCircle(-107, -59, 2);
 }
 
-// 10. Shoe rack with three chunky cute runners side-by-side.
+// 10. Shoe rack: Dad's racers and the three kids' pairs, at the room's scale
+// (the kids' bikes are 92 to 124 px, so a grown-up shoe is about 110 px).
+// Kids' pairs are graded small to big like the bikes, Dad's pair on the right.
+// Each pair is two side views, the far shoe a shade darker, set back on the
+// shelf top. Dad's near shoe is drawn separately by _shoesDad so the pet can
+// ride it; its partner stays here on the rack.
+const DAD_SHOE = {
+  upper: 0xf1e9d8, shade: 0xd8ccb3, mid: 0xffffff, sole: 0x2b2b30,
+  accent: 0xff6a1a, lace: 0xbfb39a, lining: 0x3a3a40, band: true
+};
+const KID_SHOE = {
+  upper: 0xffffff, shade: 0xe6e0ea, mid: 0xffd6e8, sole: 0xff5fa2,
+  accent: 0xff7eb6, lace: 0xff7eb6, lining: 0xb8467a, band: false
+};
+// Near shoe x (node space) and length for each pair, left to right.
+const SHOE_PAIRS = [
+  { x: -230, len: 65, pal: KID_SHOE },
+  { x: -105, len: 78, pal: KID_SHOE },
+  { x: 34, len: 90, pal: KID_SHOE },
+  { x: 191, len: 110, pal: DAD_SHOE }
+];
+const SHOE_SHELF_Y = 38;     // near shoes stand on the shelf's front edge
+const SHOE_BACK_Y = 32;      // far shoes stand further back on the shelf top
+
 function drawShoeRack(g) {
   g.fillStyle(0x000000, 0.4);
-  g.fillEllipse(0, 78, 700, 12);
-  // Rack shelf
+  g.fillEllipse(0, 78, 580, 12);
+  // Shelf: the top face the far shoes stand on, then the front edge
+  g.fillStyle(0x4a3c2e, 1);
+  g.fillRoundedRect(-280, 26, 560, 14, 4);
   g.fillStyle(0x3a2f24, 1);
-  g.fillRoundedRect(-340, 38, 680, 18, 4);
+  g.fillRoundedRect(-280, SHOE_SHELF_Y, 560, 18, 4);
   g.fillStyle(0x2a2218, 1);
-  g.fillRect(-340, 52, 680, 4);
-  // Three runners: cream upper with different accent pops. The teal middle
-  // one (0, 14) is drawn separately by _shoesTeal so the pet can ride it.
-  drawCuteShoe(g, -210, 14, 0xfff5e6, 0xff66aa); // pink
-  drawCuteShoe(g, 210, 14, 0xfff5e6, 0xff8a3d);  // orange
+  g.fillRect(-280, 52, 560, 4);
+  for (const p of SHOE_PAIRS) {
+    const back = shadeShoePalette(p.pal, 0.8);
+    drawRacerShoe(g, p.x + Math.round(p.len * 0.14), SHOE_BACK_Y, p.len, back);
+    if (p.pal !== DAD_SHOE) drawRacerShoe(g, p.x, SHOE_SHELF_Y, p.len, p.pal);
+  }
 }
 
-// Side-profile chunky runner: stacked sole, puffy upper, big toe box,
-// tongue + heel pull, lace bow. Designed to read as cute, not technical.
-function drawCuteShoe(g, ox, oy, upperColor, accent) {
-  // Soft ground shadow
-  g.fillStyle(0x000000, 0.28);
-  g.fillEllipse(ox + 4, oy + 28, 160, 10);
+// A palette one shade darker, for the far shoe of a pair.
+function shadeShoePalette(pal, f) {
+  const dim = c => {
+    const r = Math.round(((c >> 16) & 255) * f);
+    const gr = Math.round(((c >> 8) & 255) * f);
+    const b = Math.round((c & 255) * f);
+    return (r << 16) | (gr << 8) | b;
+  };
+  const out = { ...pal };
+  for (const k of ['upper', 'shade', 'mid', 'sole', 'accent', 'lace', 'lining']) out[k] = dim(pal[k]);
+  return out;
+}
 
-  // OUTSOLE — rubber, slightly tan
-  g.fillStyle(0xd0c8b6, 1);
-  g.fillRoundedRect(ox - 75, oy + 12, 162, 14, 7);
-  // Toe rocker bump
-  g.fillCircle(ox + 82, oy + 16, 10);
+// Side view of a low racing shoe, toe to the right. (ox, oy) is the ground
+// under the middle of the sole and `len` its length toe to heel. Thin sole,
+// low foam midsole with a little toe spring, a snug sock-like upper with the
+// collar about 0.3 x len up. Dad's palette adds the curved side accent.
+function drawRacerShoe(g, ox, oy, len, pal) {
+  const u = len / 100;
+  const P = pts => pts.map(([x, y]) => ({ x: ox + x * u, y: oy + y * u }));
 
-  // MIDSOLE — chunky white foam
-  g.fillStyle(0xfdfaf2, 1);
-  g.fillRoundedRect(ox - 75, oy - 4, 162, 20, 12);
-  // Toe spring (curls up)
-  g.fillCircle(ox + 82, oy + 6, 14);
-  // Heel block (taller wedge)
-  g.fillRoundedRect(ox - 78, oy - 14, 40, 30, 12);
+  // Outsole
+  g.fillStyle(pal.sole, 1);
+  g.fillPoints(P([[-49, 0], [28, 0], [40, -1.5], [48, -4.5], [50, -7.5], [46, -8], [38, -5],
+    [28, -3.5], [-49, -3.5], [-51, -1.5]]), true);
+  // Midsole foam
+  g.fillStyle(pal.mid, 1);
+  g.fillPoints(P([[-49, -3.5], [-51, -8], [-50, -13], [-30, -13], [0, -11.5], [25, -10],
+    [42, -9.5], [49, -9.5], [50, -7.5], [46, -6], [38, -4.5], [28, -3.5]]), true);
 
-  // Midsole top sheen
-  g.fillStyle(0xffffff, 0.8);
-  g.fillRoundedRect(ox - 70, oy - 3, 152, 3, 2);
-  // Midsole bottom shadow
-  g.fillStyle(0x000000, 0.12);
-  g.fillRoundedRect(ox - 70, oy + 13, 152, 3, 2);
+  // Upper
+  g.fillStyle(pal.upper, 1);
+  g.fillPoints(P([[-50, -12.5], [-51, -21], [-50, -29], [-47, -35], [-41, -33.5], [-35, -30],
+    [-26, -30], [-19, -34], [-14, -33], [-8, -28.5], [5, -23.5], [20, -19.5], [33, -16.5],
+    [42, -13.5], [48, -10.5], [49, -9.5], [42, -9.5], [25, -10], [0, -11.5], [-30, -13]]), true);
+  // Shade along the bottom of the upper, where it meets the foam
+  g.fillStyle(pal.shade, 1);
+  g.fillPoints(P([[-50, -12.5], [-50, -16], [-30, -16.5], [0, -14.5], [25, -12.5], [42, -11.5],
+    [48, -10.5], [49, -9.5], [42, -9.5], [25, -10], [0, -11.5], [-30, -13]]), true);
+  // Collar lining, the dark rim of the opening
+  g.fillStyle(pal.lining, 1);
+  g.fillPoints(P([[-46, -34], [-41, -33.5], [-35, -30], [-26, -30], [-21, -32.5], [-22, -30],
+    [-27, -28], [-35, -28], [-41, -31]]), true);
+  // Heel counter
+  g.fillStyle(pal.accent, 1);
+  g.fillPoints(P([[-50, -13], [-51, -21], [-50, -29], [-47, -35], [-43, -34.5], [-44, -27],
+    [-44, -13]]), true);
 
-  // Plate accent stripe through sole
-  g.fillStyle(accent, 1);
-  g.fillRoundedRect(ox - 75, oy + 8, 162, 5, 2);
-
-  // UPPER — puffy rounded mound
-  g.fillStyle(upperColor, 1);
-  // Main body ellipse
-  g.fillEllipse(ox - 6, oy - 18, 138, 38);
-  // Toe dome (round, cute)
-  g.fillCircle(ox + 58, oy - 8, 22);
-  // Heel cup
-  g.fillCircle(ox - 62, oy - 12, 18);
-
-  // Upper bottom shadow band (where it meets sole)
-  g.fillStyle(0x000000, 0.15);
-  g.fillEllipse(ox - 6, oy - 2, 134, 5);
-  // Upper top highlight
-  g.fillStyle(0xffffff, 0.45);
-  g.fillEllipse(ox - 10, oy - 30, 92, 6);
-
-  // Tongue (poking up at ankle)
-  g.fillStyle(upperColor, 1);
-  g.fillRoundedRect(ox - 24, oy - 40, 28, 20, 9);
-  // Tongue base shadow
-  g.fillStyle(0x000000, 0.18);
-  g.fillRoundedRect(ox - 24, oy - 24, 28, 4, 2);
-  // Tongue logo tab
-  g.fillStyle(accent, 1);
-  g.fillRoundedRect(ox - 18, oy - 36, 16, 7, 2);
-
-  // Curved side swoosh
-  g.lineStyle(8, accent, 1);
-  g.beginPath();
-  g.moveTo(ox - 38, oy - 4);
-  g.lineTo(ox + 18, oy - 18);
-  g.lineTo(ox + 48, oy - 10);
-  g.strokePath();
-  // Swoosh inner sheen
-  g.lineStyle(2.5, 0xffffff, 0.55);
-  g.beginPath();
-  g.moveTo(ox - 32, oy - 8);
-  g.lineTo(ox + 14, oy - 18);
-  g.strokePath();
-
-  // Eyelets
-  g.fillStyle(0x14141a, 0.9);
-  for (let i = 0; i < 4; i++) g.fillCircle(ox - 8 + i * 9, oy - 30, 1.8);
-  // Short lace runs between eyelets
-  g.lineStyle(2.2, 0xfff8e0, 1);
-  for (let i = 0; i < 3; i++) {
-    g.lineBetween(ox - 8 + i * 9, oy - 30, ox + 1 + i * 9, oy - 28);
+  if (pal.band) {
+    // Curved side accent: an even band from the midfoot up to the heel.
+    const A = [12, -13.5], C = [-14, -11.5], B = [-42, -25], T = 3.6;
+    const lo = [], hi = [];
+    for (let i = 0; i <= 10; i++) {
+      const t = i / 10, m = 1 - t;
+      const x = m * m * A[0] + 2 * m * t * C[0] + t * t * B[0];
+      const y = m * m * A[1] + 2 * m * t * C[1] + t * t * B[1];
+      lo.push([x, y]);
+      hi.unshift([x, y - T]);
+    }
+    g.fillStyle(pal.accent, 1);
+    g.fillPoints(P(lo.concat(hi)), true);
   }
-  // Cute lace bow loops
-  g.fillStyle(0xfff8e0, 1);
-  g.fillCircle(ox - 11, oy - 40, 3.5);
-  g.fillCircle(ox - 3, oy - 40, 3.5);
-  g.fillStyle(accent, 0.6);
-  g.fillCircle(ox - 11, oy - 40, 1.4);
-  g.fillCircle(ox - 3, oy - 40, 1.4);
 
-  // Heel pull tab
-  g.fillStyle(accent, 1);
-  g.fillRoundedRect(ox - 84, oy - 26, 10, 14, 3);
+  // Centred lacing: short ties down the throat
+  g.lineStyle(Math.max(1.5, 2 * u), pal.lace, 1);
+  for (let i = 0; i < 4; i++) {
+    const x = -13 + i * 6, y = -31 + i * 2.2;
+    g.lineBetween(ox + (x - 2) * u, oy + (y - 1.5) * u, ox + (x + 2) * u, oy + (y + 1.5) * u);
+  }
+  // Soft highlight along the top of the foot
+  g.lineStyle(Math.max(1, 1.6 * u), 0xffffff, 0.5);
+  g.lineBetween(ox - 6 * u, oy - 27 * u, ox + 20 * u, oy - 18.5 * u);
 }
