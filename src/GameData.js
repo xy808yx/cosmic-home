@@ -512,8 +512,8 @@ export const VISIBLE_WORLDS = WORLDS.filter(w => !w.hidden);
 export const HIDDEN_WORLDS = WORLDS.filter(w => w.hidden);
 
 // The three secret-room notice boards. They share one note pool and one deck
-// (see src/content/dadNotes.js + claimDailyNoteForBoard), but each keeps its own
-// once-per-day stardust claim. Declared here rather than imported so GameData
+// (see src/content/dadNotes.js + getDailyNoteForBoard), but each pays its own
+// once-per-day stardust when its note is opened. Declared here rather than imported so GameData
 // stays free of content-file dependencies; the list must match NOTE_BOARDS.
 export const DAD_NOTE_BOARDS = ['garage', 'playground', 'hotpot'];
 
@@ -1219,8 +1219,8 @@ class PlayerProgress {
         // Legacy per-board note state. Superseded by dadNotePoolState below (the
         // three boards now share one pool); loaded so old saves still parse.
         this.hotPotNoteState = { lastClaimDate: null, nextIndex: 0, ...(data.hotPotNoteState || {}) };
-        // Shared daily deal for all three Dad's-notes boards: one deck, three
-        // notes pinned per day, one +10 claim each. See claimDailyNoteForBoard.
+        // Shared daily deal for all three Dad's note boards: one deck, three
+        // notes pinned per day, one +10 each when opened. See getDailyNoteForBoard.
         this.dadNotePoolState = { dealDate: null, deck: [], deckN: 0, assigned: null, claimed: {}, ...(data.dadNotePoolState || {}) };
         this.tutorialSeen = !!data.tutorialSeen;
         this.cosmicHintSeen = !!data.cosmicHintSeen;
@@ -1736,9 +1736,10 @@ class PlayerProgress {
     this.save();
   }
 
-  // Pull today's note for one of the three Dad's-notes boards (garage,
-  // playground, hotpot). Returns { isNewDay, message, index }, where isNewDay
-  // means the caller should award that board's daily stardust.
+  // Today's note for one of the three Dad's note boards (garage, playground,
+  // hotpot). Returns { message, index, unread }. Looking a note up never pays:
+  // the board's daily stardust is paid when the kid opens it, through
+  // claimDailyNoteReward, and `unread` says whether that is still to come.
   //
   // All three boards share ONE pool and ONE shuffled deck (src/content/dadNotes.js).
   // Each morning the deck deals three DIFFERENT notes and pins one to each board
@@ -1746,12 +1747,13 @@ class PlayerProgress {
   //   • visiting all three rooms in a day gives three new notes, never the same
   //     line repeated — which a per-board deck could not guarantee;
   //   • every note in the pool is still seen exactly once before any repeat;
-  //   • each board keeps its own once-per-day +10 claim (30/day for all three).
-  // Re-entering a room later the same day re-shows that board's pinned note and
-  // pays nothing. The deck reshuffles when it empties or when the pool size
-  // changes (i.e. J edited a notes file), which re-deals the day.
-  claimDailyNoteForBoard(notes, boardKey) {
-    if (!notes || notes.length === 0) return { isNewDay: false, message: '', index: 0 };
+  //   • each board pays its own +10 once a day, the first time its note is
+  //     opened (30/day for all three).
+  // Re-entering a room later the same day re-shows that board's pinned note.
+  // The deck reshuffles when it empties or when the pool size changes (i.e. J
+  // edited a notes file), which re-deals the day.
+  getDailyNoteForBoard(notes, boardKey) {
+    if (!notes || notes.length === 0) return { message: '', index: 0, unread: false };
     // Local calendar date (YYYY-MM-DD) — must match EconomyManager.todayString so
     // the note and its daily stardust reset together at LOCAL midnight.
     const d = new Date();
@@ -1777,15 +1779,20 @@ class PlayerProgress {
 
     const raw = state.assigned[boardKey];
     const index = Number.isInteger(raw) ? ((raw % N) + N) % N : 0;
-    const isNewDay = !state.claimed?.[boardKey];
-    if (isNewDay) {
-      state.claimed = { ...(state.claimed || {}), [boardKey]: true };
-      this.save();
-    }
-    return { isNewDay, message: notes[index], index };
+    return { message: notes[index], index, unread: !state.claimed?.[boardKey] };
   }
 
-  // LEGACY per-board dealer, superseded by claimDailyNoteForBoard above (the
+  // The kid opened today's note on this board. True the first time per board
+  // per day, which is when the note pays its stardust; false after that.
+  claimDailyNoteReward(boardKey) {
+    const state = this.dadNotePoolState;
+    if (!state?.assigned || state.claimed?.[boardKey]) return false;
+    state.claimed = { ...(state.claimed || {}), [boardKey]: true };
+    this.save();
+    return true;
+  }
+
+  // LEGACY per-board dealer, superseded by getDailyNoteForBoard above (the
   // three boards now share one pool). Kept so an old save's per-board state and
   // any straggling caller still behave; safe to delete once nothing calls it.
   claimDailyDadNoteIfDue(notes, stateKey = 'dadNoteState') {

@@ -10,8 +10,9 @@
 //
 // Each morning the deck deals three DIFFERENT notes and pins one to each board
 // for the day, so visiting all three rooms gives three new notes rather than the
-// same line three times. Each board still pays its own +10 stardust once a day
-// (30/day for all three). See PlayerProgress.claimDailyNoteForBoard.
+// same line three times. Each board pays its own +10 stardust once a day, the
+// first time its note is opened (30/day for all three). See
+// PlayerProgress.getDailyNoteForBoard and claimDailyNoteReward.
 //
 // Every note is shown once before any repeat, in random order, reshuffling each
 // cycle. At three a day that's about eight weeks of notes before anything comes

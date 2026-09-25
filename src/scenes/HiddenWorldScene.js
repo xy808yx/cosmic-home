@@ -8,6 +8,8 @@ import { TransitionManager } from '../TransitionManager.js';
 import { style, TYPE } from '../textStyles.js';
 import { createButton } from '../buttonHelper.js';
 import { createModal } from '../modalHelper.js';
+import { economy } from '../EconomyManager.js';
+import { drawSparkleIcon } from '../StatIcons.js';
 import { companion, drawCompanion } from '../CompanionManager.js';
 import { anchorXY, PET_SPRITES } from '../PetSprites.js';
 import { cosmetics } from '../CosmeticManager.js';
@@ -22,10 +24,7 @@ const H = 1920;
 
 // Shrink a Text down through `sizes` until it fits `maxH`, then, if the smallest
 // size still overflows, trim whole words off the end and add an ellipsis. Used
-// by the garage whiteboard, which letters its note onto a fixed-height panel:
-// the shared note pool contains everything from one-liners to short stories, and
-// an unbounded note would run off the board. The full text is always one tap
-// away in showDailyNotePopup, so a trimmed teaser loses nothing.
+// by the room speech bubbles, which sit in a fixed-height panel.
 function fitTextToBox(textObj, message, maxH, sizes) {
   for (const size of sizes) {
     textObj.setFontSize(size);
@@ -60,52 +59,22 @@ function addLeaveButton(scene, onClick) {
   }).setDepth(15);
 }
 
-// The "NEW +10 ✨" sticker a note board wears on its first read of the day.
-// Sized from its text at the label size, so it never clips it. Stacked on two
-// lines by default; `row: true` lays the same words out on one line, for the
-// notes boards, where only a short strip under the lettering is free. The
-// returned container carries its size as badgeW / badgeH for placement.
-function makeNewNoteBadge(scene, { row = false } = {}) {
-  const badge = scene.add.container(0, 0);
-  const ink = { fill: '#2a1f12' };
-  const top = scene.add.text(0, 0, 'NEW', style('caption', { ...ink, fontStyle: '900' })).setOrigin(0.5);
-  const bottom = scene.add.text(0, 0, '+10 ✨', style('caption', { ...ink, fontStyle: '800' })).setOrigin(0.5);
-  const padX = 18, padY = 8, tuck = 8; // the two line boxes carry air, so tuck them together
-  let w, h;
-  if (row) {
-    const gap = 14;
-    w = Math.ceil(top.width + gap + bottom.width) + padX * 2;
-    h = Math.ceil(Math.max(top.height, bottom.height)) + padY * 2;
-    top.x = -w / 2 + padX + top.width / 2;
-    bottom.x = w / 2 - padX - bottom.width / 2;
-  } else {
-    w = Math.ceil(Math.max(top.width, bottom.width)) + padX * 2;
-    h = Math.ceil(top.height + bottom.height) - tuck + padY * 2;
-    top.y = -h / 2 + padY + top.height / 2;
-    bottom.y = h / 2 - padY - bottom.height / 2;
-  }
-  const bg = scene.add.graphics();
-  bg.fillStyle(0xffd86b, 1); bg.fillRoundedRect(-w / 2, -h / 2, w, h, 12);
-  bg.lineStyle(3, 0x2a1f12, 1); bg.strokeRoundedRect(-w / 2, -h / 2, w, h, 12);
-  badge.add([bg, top, bottom]);
-  badge.badgeW = w;
-  badge.badgeH = h;
-  return badge;
-}
-
 // The message box sizes itself to its text. Rooms dock it in the top strip
 // (the same band the fixed box always used, so it covers nothing new there);
 // the garage docks it at the bottom, in the empty floor strip under the shoe
 // rack, because its top row and the pet climbing on it sit under the top strip.
 // Nothing in the garage is drawn or walks below about y 1730.
 const BUBBLE_DOCK_Y = { top: 420, bottom: 1828 };
+
+// What opening a board's note pays, once per board per day.
+const DAD_NOTE_STARDUST = 10;
 const BUBBLE_MAX_W = 960;
 const BUBBLE_MAX_H = 170;
 const BUBBLE_PAD_X = 48;
 const BUBBLE_PAD_Y = 24;
 
-// Dad's notes board (playground + hot pot), in the board's own coordinates:
-// the ground line is y 124. Wide and tall enough for "DAD'S NOTES" at the
+// Dad's note board (playground + hot pot), in the board's own coordinates:
+// the ground line is y 124. Wide and tall enough for "DAD'S NOTE" at the
 // label size and "Tap to read" at the body size. drawDadNotesBoard draws to
 // these numbers.
 const NOTES_BOARD = { halfW: 152, top: -108, bottom: 62, headerY: -66, dividerY: -38, hintY: 4 };
@@ -456,18 +425,11 @@ export class HiddenWorldScene extends Phaser.Scene {
   // GARAGE EXTRAS — whiteboard + pet companion + leave handling
   // ----------------------------------------------------------
   createWhiteboard() {
-    // Pull today's note; mark as claimed if it's a new day.
-    const { isNewDay, message } = progress.claimDailyNoteForBoard(DAD_NOTES, 'garage');
-    let stardustAwarded = false;
-    if (isNewDay) {
-      progress.economy.stardust = (progress.economy.stardust || 0) + 10;
-      progress.save();
-      stardustAwarded = true;
-    }
+    const { message } = progress.getDailyNoteForBoard(DAD_NOTES, 'garage');
 
     // Whiteboard frame, mounted on the wall between the room title and the
-    // pegboard. Sized for three lines of the note at the label size; the heat
-    // lamp hangs just left of it and the Leave button sits above-right.
+    // pegboard; the heat lamp hangs just left of it and the Leave button sits
+    // above-right.
     const bw = 560, bh = 166, by = 288;
     const wb = this.add.container(W / 2, by).setDepth(3);
     const frame = this.add.graphics();
@@ -486,60 +448,69 @@ export class HiddenWorldScene extends Phaser.Scene {
     frame.fillCircle(-bw / 2 + 90, bh / 2, 5);
     wb.add(frame);
 
-    // The day's message, hand-lettered feel. This board shows the note INLINE on
-    // a fixed panel: a short note reads at the body size, a longer one steps
-    // down to the label size, and a long one becomes a trimmed teaser at the
-    // label size. Tapping opens the full text.
-    const noteText = this.add.text(0, 0, message, style('body', {
-      fill: '#2a1f12',
-      align: 'center',
-      wordWrap: { width: bw - 60 },
-      fontStyle: 'italic'
-    })).setOrigin(0.5);
-    fitTextToBox(noteText, message, bh - 28, [TYPE.body, TYPE.label]);
-    wb.add(noteText);
+    // Lettered like the playground and hot pot boards: the board's name, a
+    // divider, and "Tap to read". The note itself only opens in the popup, so
+    // reading it is always the kid's choice, the same in all three rooms.
+    wb.add(this.add.text(0, -32, "DAD'S NOTE", style('caption', {
+      fill: '#2a1f12', fontStyle: '900'
+    })).setOrigin(0.5));
+    frame.fillStyle(0xd8d8cc, 1);
+    frame.fillRect(-118, -4, 236, 3);
+    wb.add(this.add.text(0, 34, 'Tap to read', style('body', {
+      fill: '#5a4a36', fontStyle: 'italic'
+    })).setOrigin(0.5));
 
-    // "NEW +10 ✨" badge if this is a fresh claim, fades on tap. It hangs off
-    // the board's top-right corner onto the bare wall, clear of the note, the
-    // title and the Leave button, and is tappable like the board. Only its
-    // edge laps the frame: the note's lines run right up to the white panel's
-    // edge, and a badge lapped onto the panel crowded them.
-    let badge = null;
-    if (stardustAwarded) {
-      badge = makeNewNoteBadge(this);
-      badge.setPosition(bw / 2 + badge.badgeW / 2 - 8, -bh / 2 + badge.badgeH / 2);
-      wb.add(badge);
-      this.tweens.add({
-        targets: badge,
-        scale: { from: 1, to: 1.08 },
-        duration: 700,
-        yoyo: true,
-        repeat: -1,
-        ease: 'Sine.easeInOut'
-      });
-    }
-
-    const openNote = () => {
-      audio.playClick?.();
-      if (badge) {
-        const fading = badge;
-        badge = null;
-        this.tweens.add({
-          targets: fading,
-          alpha: 0, scale: 0.6, duration: 350,
-          onComplete: () => fading.destroy()
-        });
-      }
-      this.showDailyNotePopup(message);
-    };
     const hit = this.add.rectangle(W / 2, by, bw + 20, bh + 24, 0, 0)
       .setInteractive({ useHandCursor: true }).setDepth(4);
-    hit.on('pointerdown', openNote);
-    if (badge) {
-      const badgeHit = this.add.rectangle(0, 0, badge.badgeW, badge.badgeH, 0, 0)
-        .setInteractive({ useHandCursor: true });
-      badge.add(badgeHit);
-      badgeHit.on('pointerdown', openNote);
+    hit.on('pointerdown', () => this.openDailyNote('garage', message));
+  }
+
+  // A tap on any of the three note boards. Opening today's note is what pays
+  // that board's 10 stardust, once a day. The note shows on its own, with no
+  // sticker or number on it; the stardust rises where the note was, after the
+  // kid closes it. `onClose` then runs (the hot pot pet trots over to the board).
+  openDailyNote(boardKey, message, onClose = null) {
+    audio.playClick?.();
+    const earned = progress.claimDailyNoteReward(boardKey);
+    if (earned) economy.addStardust(DAD_NOTE_STARDUST);
+    this.showDailyNotePopup(message, () => {
+      if (earned) this.showNoteStardust(W / 2, H / 2);
+      onClose?.();
+    });
+  }
+
+  // "+10" and the stardust mark in the stardust purple, rising from where the
+  // note was and fading, with a few small stardust sparkles drifting up around
+  // it. Starting there keeps it off every board's own lettering.
+  showNoteStardust(x, y) {
+    audio.playStardustChime?.();
+    const group = this.add.container(x, y).setDepth(40);
+    const label = this.add.text(0, 0, `+${DAD_NOTE_STARDUST}`, style('display', {
+      fontSize: `${TYPE.body}px`, fill: '#c77eff', stroke: '#1a0f2e', strokeThickness: 6
+    })).setOrigin(0.5);
+    const icon = this.add.graphics();
+    const iconR = 20, gap = 10;
+    drawSparkleIcon(icon, 0, 0, iconR);
+    const total = label.width + gap + iconR * 2;
+    label.x = -total / 2 + label.width / 2;
+    icon.x = total / 2 - iconR;
+    group.add([label, icon]);
+    group.setScale(0.8);
+    this.tweens.add({ targets: group, scale: 1, duration: 220, ease: 'Back.easeOut' });
+    this.tweens.add({
+      targets: group, y: y - 120, duration: 1300, ease: 'Sine.easeOut',
+      onComplete: () => group.destroy()
+    });
+    this.tweens.add({ targets: group, alpha: 0, delay: 850, duration: 450 });
+    for (let i = 0; i < 5; i++) {
+      const spark = this.add.graphics().setDepth(39);
+      drawSparkleIcon(spark, 0, 0, 7 + (i % 3) * 3);
+      spark.setPosition(x + (i - 2) * 46, y + 10 + (i % 2) * 18);
+      this.tweens.add({
+        targets: spark, y: spark.y - 90 - (i % 3) * 20, alpha: 0,
+        delay: 80 * i, duration: 1100, ease: 'Sine.easeOut',
+        onComplete: () => spark.destroy()
+      });
     }
   }
 
@@ -2187,11 +2158,11 @@ export class HiddenWorldScene extends Phaser.Scene {
         bubble: 'Yeeehawww!' },
       { id: 'tire',    x: 850,   ground: R.row2, foot: 182, art: [-112, -159, 110, 194], draw: drawTireSwingFrame, label: 'Tire swing',
         bubble: 'Hold on tight!!' },
-      // Its label shares a row with the "Dad's notes" board's, which
-      // createNotesBoard hangs 8px under that board's own ground line.
+      // Its label sits level with the foot of the Dad's note board.
       { id: 'spinner', x: 230,   ground: R.row3, foot: 95,  art: [-61, -44, 60, 103],    draw: drawSpinnerPost,   label: 'Spinner',
         bubble: 'Dizzy!' },
-      // Label in the second lane, so it clears "Dad's notes" on the track's edge.
+      // Label in the second lane, so it clears the Dad's note board's posts on
+      // the track's edge.
       { id: 'track',   x: W / 2, ground: PG_TRACK_TOP + 42, area: [PG_TRACK_TOP - 14, H], bubbleY: (PG_TRACK_TOP + H) / 2,
         label: 'Running track', ink: ['#f4f8ff', '#173a63'], bubble: 'Super fast!' }
     ];
@@ -2244,10 +2215,11 @@ export class HiddenWorldScene extends Phaser.Scene {
       });
     }
 
-    // Dad's notes board on the woodchips, same daily mechanic as the garage
+    // Dad's note board on the woodchips, same daily mechanic as the garage
     // whiteboard (its own list + its own once-per-day stardust). Its top clears
     // the "Zip line" label in the row above. Its own tap box already covers
-    // the board and posts, so that's its art here.
+    // the board and posts, so that's its art here; its label is the name
+    // lettered on the board.
     const board = this.createNotesBoard(PG_NOTES.x, PG_NOTES.y, { boardKey: 'playground' });
     const boardArt = board.hit.getBounds();
     stops.push({
@@ -2439,27 +2411,18 @@ export class HiddenWorldScene extends Phaser.Scene {
     this._pgRest();
   }
 
-  // Dad's notes board. Same daily mechanic as the garage whiteboard, but its own
-  // note list and its own once-per-day claim: one note per real day off a
-  // separate shuffled deck, +10 stardust the first time it's tapped each day. A
-  // "NEW +10 ✨" badge marks a fresh claim.
+  // Dad's note board. Same daily mechanic as the garage whiteboard: its own
+  // note for the day off the shared deck, and +10 stardust the first time
+  // that note is opened each day (see openDailyNote).
   //
-  // Parameterized because there are now two of these (the Recess woodchips board
-  // and the Hot Pot table board), differing only in deck, save key and the
-  // ground-label stroke that keeps it readable against its own backdrop. Defaults
-  // are the Recess values, so the playground call site reads exactly as before.
+  // Parameterized because there are two of these (the Recess woodchips board
+  // and the Hot Pot table board), differing only in deck, save key and what
+  // happens after the note is read. Defaults are the Recess values.
   createNotesBoard(x, y, {
     boardKey = 'playground',
-    labelStroke = '#1a3a18',
     onTap = null
   } = {}) {
-    const { isNewDay, message } = progress.claimDailyNoteForBoard(DAD_NOTES, boardKey);
-    let awarded = false;
-    if (isNewDay) {
-      progress.economy.stardust = (progress.economy.stardust || 0) + 10;
-      progress.save();
-      awarded = true;
-    }
+    const { message } = progress.getDailyNoteForBoard(DAD_NOTES, boardKey);
 
     const node = this.add.container(x, y).setDepth(8);
     const g = this.add.graphics();
@@ -2472,60 +2435,23 @@ export class HiddenWorldScene extends Phaser.Scene {
 
     // Header lettered onto the parchment at the label size; the "Tap to read"
     // instruction under it at the body size, like every other hint (the
-    // parchment in drawDadNotesBoard is sized to hold them).
-    node.add(this.add.text(0, NOTES_BOARD.headerY, "DAD'S NOTES", style('caption', {
+    // parchment in drawDadNotesBoard is sized to hold them). The board names
+    // itself, so it carries no second label on the ground: this lettering is
+    // its label (the playground fits tap boxes to labels).
+    const label = this.add.text(0, NOTES_BOARD.headerY, "DAD'S NOTE", style('caption', {
       fill: '#2a1f12', fontStyle: '900'
-    })).setOrigin(0.5));
+    })).setOrigin(0.5);
+    node.add(label);
     const hint = this.add.text(0, NOTES_BOARD.hintY, 'Tap to read', style('body', {
       fill: '#5a4a36', fontStyle: 'italic'
     })).setOrigin(0.5);
     node.add(hint);
 
-    // Ground label, matching the other equipment.
-    const labelDy = 132;
-    const label = addRoomLabel(this, x, y + labelDy, "Dad's notes", '#ffffff', labelStroke);
-
-    // NEW +10 ✨ badge on a fresh day; fades + stops bobbing on tap. One row,
-    // stuck across the foot of the board in the strip between "Tap to read"
-    // and the ground label: both rooms pack their neighbors (the spinner, the
-    // sauce bar, the cone machine) right up to the board, and a sticker hung
-    // off its side covered them and their tap zones.
-    let badge = null;
-    let badgeTween = null;
-    if (awarded) {
-      badge = makeNewNoteBadge(this, { row: true });
-      const hintBottom = NOTES_BOARD.hintY + hint.height / 2;
-      const labelTop = labelDy - label.height / 2;
-      badge.setPosition(0, Math.round((hintBottom + labelTop) / 2));
-      node.add(badge);
-      badgeTween = this.tweens.add({
-        targets: badge, scale: { from: 1, to: 1.1 },
-        duration: 700, yoyo: true, repeat: -1, ease: 'Sine.easeInOut'
-      });
-    }
-
-    const openNote = () => {
-      audio.playClick?.();
-      if (badge) {
-        const fading = badge; badge = null;
-        badgeTween?.stop();
-        this.tweens.add({ targets: fading, alpha: 0, scale: 0.6, duration: 350, onComplete: () => fading.destroy() });
-      }
-      // The reaction waits for the popup to close, so it plays in the open
-      // room rather than hidden behind the modal dim.
-      this.showDailyNotePopup(message, onTap);
-    };
     // Board plus posts, from the frame top down to the ground line.
     const hitTop = NOTES_BOARD.top - 6, hitBottom = 128;
     const hit = this.add.rectangle(x, y + (hitTop + hitBottom) / 2, NOTES_BOARD.halfW * 2 + 16, hitBottom - hitTop, 0, 0)
       .setInteractive({ useHandCursor: true }).setDepth(9);
-    hit.on('pointerdown', openNote);
-    if (badge) {
-      const badgeHit = this.add.rectangle(0, 0, badge.badgeW, badge.badgeH, 0, 0)
-        .setInteractive({ useHandCursor: true });
-      badge.add(badgeHit);
-      badgeHit.on('pointerdown', openNote);
-    }
+    hit.on('pointerdown', () => this.openDailyNote(boardKey, message, onTap));
     return { node, hit, label };
   }
 
@@ -3513,12 +3439,11 @@ export class HiddenWorldScene extends Phaser.Scene {
       });
     }
 
-    // Dad's notes board — the third independent daily deck (family/sharing/
+    // Dad's note board: the third independent daily deck (family/sharing/
     // people), its own once-per-day claim so all three can be read in one day.
     // Mounted on the wall beside the table rather than on a stand.
     this.createNotesBoard(560, 1180, {
       boardKey: 'hotpot',
-      labelStroke: '#2a1008',
       onTap: () => this.hotPotPetInteract('board')
     });
 
@@ -3982,7 +3907,7 @@ export class HiddenWorldScene extends Phaser.Scene {
     });
   }
 
-  // Dad's notes (560,1180): trot over and look up at the board while it's read.
+  // Dad's note (560,1180): trot over and look up at the board while it's read.
   petReadBoard() {
     if (!this._hpStart()) return;
     const pet = this._hotPotPet;
@@ -4593,7 +4518,7 @@ function drawFenceStrip(bg, y, h) {
 // Ground lines for the three rows of equipment. Each object's node sits its
 // renderer's `foot` above its row's line and its label hangs PG_LABEL_DROP
 // under it, so the labels in a row line up. Row 3's line puts the spinner's
-// label level with the "Dad's notes" board's.
+// label level with the foot of the Dad's note board.
 const PG_GROUND = { row1: 1046, row2: 1440, row3: 1708 };
 const PG_LABEL_DROP = 24;
 const PG_TRACK_TOP = H - 178;
@@ -4601,7 +4526,7 @@ const PG_TRACK_TOP = H - 178;
 const PG_BREATHE = 1.03;
 // A finger's margin around each stop's drawn art in its tap box.
 const PG_HIT_PAD = 16;
-// Dad's notes board on the woodchips (its ground line is 124 under this).
+// Dad's note board on the woodchips (its ground line is 124 under this).
 const PG_NOTES = { x: 560, y: 1600 };
 // Extra off-screen room in the track wrap, for a held cosmetic poking out
 // past the body: the Dried Mango reaches about 70px past an ember adult's
@@ -4620,7 +4545,7 @@ const PG_HOME = {
 };
 // Walkways. The pet walks along these ground lines (row 1, row 2, the track's
 // edge) and gets between them only through the open gaps: past the end of the
-// big slide (x 650) and down the woodchips right of Dad's notes (x 790).
+// big slide (x 650) and down the woodchips right of Dad's note board (x 790).
 const PG_WALK_Y = [PG_GROUND.row1, PG_GROUND.row2, PG_HOME.feet];
 const PG_WALK_X = [650, 790];
 // Where the pet hops the fence onto the field, from the woodchips side.
@@ -4853,7 +4778,7 @@ function drawSpinnerDots(g, a) {
   }
 }
 
-// Dad's notes board: a parchment notice board on two wooden posts. Headers and
+// Dad's note board: a parchment notice board on two wooden posts. Headers and
 // the "Tap to read" affordance are added as text by createNotesBoard, at the
 // NOTES_BOARD positions.
 function drawDadNotesBoard(g) {
