@@ -8,17 +8,19 @@
 //      Cosmic) a short homeward coda that names the Nanocraft reward and points
 //      at the gate into Chapter 3. Sets finaleSeen. The hero card used to play
 //      here; it now closes the whole game at World 38 instead.
-//   'homecoming' (Chapter 3 / World 38, Home Ground): cards over the dusk sky,
-//      then the prominent 中文 hero shout-out for the three kids (names one at a
-//      time, then the message), then the lit mountain and the city lights coming
-//      on below, closing on the personal message once more. No pet beat (the pet
-//      is already Cosmic). Sets finale3Seen.
+//   'homecoming' (Chapter 3 / World 38, Home Ground): The Ride Down. One
+//      continuous dusk scene in the paper-cutout style: the summit lines, the
+//      pet hops into the red cabin, the four recap cards ride down with it while
+//      the places, the trail lamps and the city light up below, then the cabin
+//      docks, the pet steps out, and the three names and the message close the
+//      game over the lit city. No pet evolution beat (the pet is already Cosmic)
+//      and no skip. Sets finale3Seen.
 //
 // On exit, returns to WorldMapScene parked on the chapter's final world and
 // clears justClearedWorld so the auto-advance doesn't run on top of the finale.
 
 import Phaser from 'phaser';
-import { progress, getChapterWorlds } from '../GameData.js';
+import { progress } from '../GameData.js';
 import { audio } from '../AudioManager.js';
 import { music } from '../MusicManager.js';
 import { MUSIC_ASSETS } from '../MusicAssets.js';
@@ -27,10 +29,9 @@ import { createStarfield } from '../starfieldHelper.js';
 import { style, TYPE } from '../textStyles.js';
 import { COLORS } from '../colorPalette.js';
 import { companion, drawCompanion } from '../CompanionManager.js';
-import { ship } from '../ShipManager.js';
-import { drawShip } from '../ShipRenderer.js';
-import { drawWorldNode } from '../WorldNodeArt.js';
 import { createButton } from '../buttonHelper.js';
+import { createRideDown, makeCaption, cabinAt, TOWER_T } from '../homeGround/rideDown.js';
+import { paper, ink } from '../homeGround/paper.js';
 
 const W = 1080;
 const H = 1920;
@@ -61,31 +62,72 @@ const FINALE_CARDS = [
 // the last stop is the climb up the mountain on your own legs and the ride back
 // down as the city lights come on. No void.
 // Card four and the World 38 description are near-twins on purpose.
+// Each card is kept as its lines: the words are fixed, only the breaks are
+// chosen (for balance on the paper strip). y is the strip's centre; show and
+// hide are ms from the start of the credits. Cards one to three sit low on the
+// screen; card four and the couplet sit high so the lamps and the city below
+// them stay in view.
 const HOMECOMING_CARDS = [
-  'You journeyed to the edge of the cosmos. Then into the smallest cell.',
-  'And now the long way around brings you somewhere new: home.',
-  'A whole Saturday of it. The store, the garden, the beach, the bread place.',
-  'You walked all the way up. The lights came on for the ride down.'
+  { lines: ['You journeyed to', 'the edge of the cosmos.', 'Then into the smallest cell.'], y: 1660, show: 10300, hide: 13700 },
+  { lines: ['And now the long way around', 'brings you somewhere new: home.'], y: 1660, show: 14200, hide: 17500 },
+  { lines: ['A whole Saturday of it.', 'The store, the garden,', 'the beach, the bread place.'], y: 1660, show: 17900, hide: 22000 },
+  { lines: ['You walked all the way up.', 'The lights came on', 'for the ride down.'], y: 222, show: 22400, hide: 25900 },
+  { lines: ['The mountain is lit', 'for the ride down.', 'Below you, one by one,', 'the city lights come on.'], y: 290, show: 26300, hide: 33800 },
 ];
 
-// Home Ground finale sky: dusk on the mountain. Violet overhead, afterglow at
-// the ridge line, warm cream low down where the city lights are coming on.
-// Plain stacked gradients only, no rays. Shared by the recap cards (homecoming
-// mode opens on this sky from the first frame instead of the starfield; the
-// far-stars callback is given up on purpose) and by the outro wash.
-const DUSK_TOP = 0x6a4b8f;
-const DUSK_MID = 0xf0b489;
-const DUSK_LOW = 0xffe9a8;
-const DUSK_SPLIT = 0.56;   // where the violet gives way to the afterglow band
-function paintDuskSky(scene, depth) {
-  const g = scene.add.graphics().setDepth(depth);
-  const split = Math.round(H * DUSK_SPLIT);
-  g.fillGradientStyle(DUSK_TOP, DUSK_TOP, DUSK_MID, DUSK_MID, 1);
-  g.fillRect(0, 0, W, split);
-  g.fillGradientStyle(DUSK_MID, DUSK_MID, DUSK_LOW, DUSK_LOW, 1);
-  g.fillRect(0, split, W, H - split);
-  return g;
+// The summit lines, said at the top where they are literally true.
+const SUMMIT_TITLE = 'CHAPTER 3 COMPLETE';
+const SUMMIT_LINES = ['You made it!', 'You got to the very top!'];
+
+// How far down the cable the ride is (0 at the summit, 1 docked at the bottom)
+// at each moment, in ms from the start. It slows through the places while card
+// three names them, and passes the trail while card four lights its lamps.
+// The ride module already eases off the top dock and into the bottom one.
+const RIDE_PACE = [[9800, 0], [18200, 0.37], [22000, 0.47], [25900, 0.64], [33800, 0.96], [34400, 1]];
+
+// A smooth, never-overshooting curve through the pace keys (monotone cubic,
+// the Fritsch and Carlson way). The ends keep their own slope, so the ride
+// sets off and arrives at the pace the ride module's own easing expects.
+function paceCurve(keys) {
+  const n = keys.length;
+  const xs = keys.map(k => k[0]);
+  const ys = keys.map(k => k[1]);
+  const d = [];
+  for (let i = 0; i < n - 1; i++) d.push((ys[i + 1] - ys[i]) / (xs[i + 1] - xs[i]));
+  const m = [d[0]];
+  for (let i = 1; i < n - 1; i++) m.push(d[i - 1] * d[i] <= 0 ? 0 : (d[i - 1] + d[i]) / 2);
+  m.push(d[n - 2]);
+  for (let i = 0; i < n - 1; i++) {
+    if (d[i] === 0) { m[i] = 0; m[i + 1] = 0; continue; }
+    const a = m[i] / d[i];
+    const b = m[i + 1] / d[i];
+    const s = a * a + b * b;
+    if (s > 9) { const k = 3 / Math.sqrt(s); m[i] = k * a * d[i]; m[i + 1] = k * b * d[i]; }
+  }
+  return (x) => {
+    if (x <= xs[0]) return ys[0];
+    if (x >= xs[n - 1]) return ys[n - 1];
+    let i = 0;
+    while (x > xs[i + 1]) i++;
+    const h = xs[i + 1] - xs[i];
+    const u = (x - xs[i]) / h;
+    const u2 = u * u;
+    const u3 = u2 * u;
+    return (2 * u3 - 3 * u2 + 1) * ys[i] + (u3 - 2 * u2 + u) * h * m[i]
+      + (-2 * u3 + 3 * u2) * ys[i + 1] + (u3 - u2) * h * m[i + 1];
+  };
 }
+
+// Stops the credits song and removes it from the game's sound manager, once.
+function releaseSong(song) {
+  if (song && !song.pendingRemove) {
+    song.stop();
+    song.destroy();
+  }
+}
+
+// The pale window of the little gondola cabin in the Chapter 2 coda.
+const DUSK_LOW = 0xffe9a8;
 
 // A small paper-cutout red gondola cabin, the Home Ground stand-in for the old
 // lamp glyph. Like every cutout it is drawn twice: first the same shapes in
@@ -133,53 +175,66 @@ export class CreditsScene extends Phaser.Scene {
     // Nanocraft trophy + marks the finale seen, so a flagless/accidental entry
     // must never land there. Every real finale launch sets creditsMode explicitly.
     this.mode = this.registry.get('creditsMode') || 'cliffhanger';
-    this.cards = this.mode === 'cliffhanger' ? CLIFFHANGER_CARDS
-      : this.mode === 'homecoming' ? HOMECOMING_CARDS
-      : FINALE_CARDS;
+    this.cards = this.mode === 'cliffhanger' ? CLIFFHANGER_CARDS : FINALE_CARDS;
 
     // Credits soundtrack: plays once (not looped) under whichever beats the
-    // mode runs (the cards, then the mode's outro; the hero card sits between
-    // them at the homecoming). Falls back silently if the file is missing.
+    // mode runs (the cards, then the mode's outro; at the homecoming, the whole
+    // Ride Down). Falls back silently if the file is missing.
     // Respect the Music toggle: creditsSong is played directly (not via
     // MusicManager), so it must check music.enabled itself or it would play
-    // through a muted setting.
+    // through a muted setting. Cleared first so a replay never inherits the
+    // last run's song.
+    this._creditsSong = null;
     if (music.enabled && this.cache.audio.exists('creditsSong')) {
       this._creditsSong = this.sound.add('creditsSong', { volume: 0.5, loop: false });
       this._creditsSong.play();
+      // The song is let go with the scene, in every mode: each run adds a
+      // fresh one to the game's sound manager, so the old one must not stay
+      // behind, and a fade cut short by the scene ending can never leave it
+      // playing.
+      const song = this._creditsSong;
+      const letGo = () => {
+        this.events.off('shutdown', letGo);
+        this.events.off('destroy', letGo);
+        releaseSong(song);
+      };
+      this.events.once('shutdown', letGo);
+      this.events.once('destroy', letGo);
     }
 
     if (this.mode === 'homecoming') {
-      // Home Ground credits open on daylight: the four recap cards play over
-      // the dusk sky on the mountain from the first frame. No starfield, no
-      // velvet dim, no twinkle sprinkle here; the outro wash is this same sky.
-      paintDuskSky(this, 0);
-    } else {
-      createStarfield(this, { width: W, height: H, accentStrength: 0 });
+      // Home Ground: The Ride Down plays from the first frame, built (and all
+      // its art baked) before the fade in lifts, so the build never shows.
+      this.playRideDown();
+      new TransitionManager(this).fadeIn(400);
+      return;
+    }
 
-      // Deep velvet backdrop on top of the starfield for cinematic mood.
-      this.backdrop = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 1).setDepth(5);
-      this.backdrop.alpha = 0;
-      this.tweens.add({ targets: this.backdrop, alpha: 0.6, duration: 800 });
+    createStarfield(this, { width: W, height: H, accentStrength: 0 });
 
-      // Sprinkle 80 twinkly stars (same as the original finale).
-      this.starLayer = this.add.container(0, 0).setDepth(8);
-      for (let i = 0; i < 80; i++) {
-        const sx = Math.random() * W;
-        const sy = Math.random() * (H - 100) + 50;
-        const r = Math.random() * 2 + 1.2;
-        const star = this.add.graphics();
-        star.fillStyle(0xffffff, 1);
-        star.fillCircle(sx, sy, r);
-        star.alpha = 0;
-        this.starLayer.add(star);
-        this.tweens.add({
-          targets: star,
-          alpha: 1,
-          duration: 600 + Math.random() * 1200,
-          delay: 200 + Math.random() * 2200,
-          ease: 'Quad.easeOut'
-        });
-      }
+    // Deep velvet backdrop on top of the starfield for cinematic mood.
+    this.backdrop = this.add.rectangle(W / 2, H / 2, W, H, 0x000000, 1).setDepth(5);
+    this.backdrop.alpha = 0;
+    this.tweens.add({ targets: this.backdrop, alpha: 0.6, duration: 800 });
+
+    // Sprinkle 80 twinkly stars (same as the original finale).
+    this.starLayer = this.add.container(0, 0).setDepth(8);
+    for (let i = 0; i < 80; i++) {
+      const sx = Math.random() * W;
+      const sy = Math.random() * (H - 100) + 50;
+      const r = Math.random() * 2 + 1.2;
+      const star = this.add.graphics();
+      star.fillStyle(0xffffff, 1);
+      star.fillCircle(sx, sy, r);
+      star.alpha = 0;
+      this.starLayer.add(star);
+      this.tweens.add({
+        targets: star,
+        alpha: 1,
+        duration: 600 + Math.random() * 1200,
+        delay: 200 + Math.random() * 2200,
+        ease: 'Quad.easeOut'
+      });
     }
 
     new TransitionManager(this).fadeIn(400);
@@ -248,18 +303,11 @@ export class CreditsScene extends Phaser.Scene {
   // the Chapter 1 (cliffhanger) payoff; in the finale the pet is already Cosmic
   // (unless a player skipped World 11 entirely, then show it once here too).
   afterCards() {
-    if (this.mode === 'homecoming') {
-      // Home Ground: the pet is already Cosmic by Chapter 3, so skip the evolution
-      // beat. The hero card (the three names and the message) plays here, at the
-      // end of the whole game, and hands off to the dusk-on-the-mountain reveal.
-      this.showHeroCard();
-      return;
-    }
     if (this.mode === 'cliffhanger') {
       this.playPetEvolutionMoment(() => this.showCliffhangerOutro());
     } else {
       // Chapter 2 finale: straight to the homeward coda (which also names the
-      // Nanocraft reward). The hero card moved to the homecoming.
+      // Nanocraft reward). The names and the message moved to the homecoming.
       if (companion.hasStarter() && !progress.companion?.cosmicForm) {
         this.playPetEvolutionMoment(() => this.showHomewardOutro());
       } else {
@@ -533,451 +581,219 @@ export class CreditsScene extends Phaser.Scene {
   }
 
   // ============================================================
-  // HOMECOMING OUTRO (Chapter 3 / World 38): dusk on the mountain, the payoff.
-  // After the hero card fades out (leaveHeroCard), the dusk wash (violet
-  // overhead, afterglow, warm cream low down) settles in as a plain gradient
-  // reveal, NO spiral/wormhole, per the content rule. The lit mountain rises,
-  // the city lights come on below it, and the journey closes on the personal
-  // message once more.
+  // THE RIDE DOWN (Chapter 3 / World 38): the end of the whole game. One
+  // continuous, auto-playing dusk scene under the credits song, about 50 s:
+  //   0 s     the summit at dusk, the cabin waiting with its door open, the
+  //           pet on the deck; CHAPTER 3 COMPLETE and the two summit lines
+  //   8.4 s   the pet hops into the window seat and the door shuts
+  //   9.8 s   the ride: the four recap cards on paper strips while the places,
+  //           the trail lamps and then the city light up below
+  //   34.4 s  the cabin docks, the door opens, the pet steps out
+  //   37.8 s  the three names one at a time, then the message, then Home
+  // Everything the ride puts on stage lives in this closure, so a Dad's Menu
+  // replay (the same scene instance) always starts clean. The ride's art is
+  // baked into textures once (see rideDown.js); per frame, only positions,
+  // scales and fades change.
   // ============================================================
-  showHomecomingOutro() {
-    // Dusk wash: the same sky the recap cards and the hero card played over,
-    // settling in on top so the stage is clean. Violet down to afterglow down
-    // to warm cream.
-    const day = paintDuskSky(this, 60);
-    day.alpha = 0;
-    this.tweens.add({ targets: day, alpha: 1, duration: 1800, ease: 'Quad.easeIn' });
-
-    // The sun is already down behind the ridge; what is left is a soft afterglow
-    // band at the horizon under the mountain (plain ellipses, no rays).
-    const sun = this.add.graphics().setDepth(61);
-    sun.fillStyle(DUSK_LOW, 0.35); sun.fillEllipse(W * 0.5, H * 0.545, 760, 220);
-    sun.fillStyle(0xfff8e7, 0.45); sun.fillEllipse(W * 0.5, H * 0.545, 360, 110);
-    sun.alpha = 0;
-    this.tweens.add({ targets: sun, alpha: 1, duration: 2200, delay: 500 });
-
-    // The Mountain, lit: reuse the World 38 node art (the lit peak with one
-    // cabin heading down toward the city lights) at 2.4x, so the icon the kid
-    // tapped on the map is the one that lights up.
-    this.time.delayedCall(1300, () => {
-      const lh = drawWorldNode(this, W / 2, H * 0.44, 38, { scale: 2.4 });
-      lh.setDepth(62); lh.setScale(0); lh.alpha = 0;
-      this.tweens.add({ targets: lh, scale: 2.4, alpha: 1, duration: 900, ease: 'Back.easeOut' });
+  playRideDown() {
+    const rd = createRideDown(this, { depth: 0 });
+    const UI = 80;
+    const INK = '#3a2a20';
+    const at = (ms, fn) => this.time.delayedCall(ms, fn);
+    const fadeTo = (targets, alpha, duration, more = {}) => this.tweens.add({
+      targets, alpha, duration, ease: alpha > 0 ? 'Sine.easeOut' : 'Sine.easeIn', ...more
     });
+    const fadeOut = (obj, ms = 320) => fadeTo(obj, 0, ms, { onComplete: () => obj.destroy() });
+    const bigText = (x, y, text, px, fill, stroke, thick) => this.add.text(x, y, text, style('display', {
+      fontSize: `${px}px`, fill, stroke, strokeThickness: thick, align: 'center'
+    })).setOrigin(0.5).setDepth(UI + 2).setAlpha(0);
 
-    // The payoff. The first two lines are the owner's own words, said to the kid
-    // who walked up this mountain herself; the third is the picture they land on.
-    // Shape is small setter-up, big landing line, quieter closing image, timed so
-    // each one gets its own beat before the personal message at 8800ms.
-    // The headline sits in the violet band, so it gets a cream fill on a dusk
-    // stroke; the lower lines sit on the afterglow and cream and keep dark fills.
-    const lines = [
-      { t: 'CHAPTER 3 COMPLETE', size: TYPE.title, fill: '#ffe9a8', stroke: '#3a2a50', y: 0.14, delay: 800 },
-      { t: 'You made it!', size: TYPE.body, fill: '#5a4410', y: 0.615, delay: 2600 },
-      { t: 'You got to the very top!', size: TYPE.heading, fill: '#4a3568', y: 0.685, delay: 4400 },
-      { t: 'The mountain is lit for the ride down.\nBelow you, one by one,\nthe city lights come on.', size: TYPE.body, fill: '#1f5a6a', y: 0.775, delay: 6600 },
-    ];
-    lines.forEach(l => {
-      const txt = this.add.text(W / 2, H * l.y, l.t, style('display', {
-        fontSize: `${l.size}px`, fill: l.fill, align: 'center',
-        stroke: l.stroke || '#fff6e0', strokeThickness: 4, wordWrap: { width: W - 120 }
-      })).setOrigin(0.5).setDepth(70);
-      txt.alpha = 0; txt.setScale(0.92);
-      this.time.delayedCall(l.delay, () => {
-        audio.playMatch?.();
-        this.tweens.add({ targets: txt, alpha: 1, scale: 1, duration: 800, ease: 'Back.easeOut' });
-      });
-    });
+    // The summit: the cabin waits with its door open, the pet on the deck.
+    rd.setRide(0);
+    rd.setPetAt('summit');
+    rd.openDoor(1);
 
-    // The personal message — the capstone of the whole game, soft and warm.
-    this.time.delayedCall(8800, () => {
-      const msg = this.add.text(W / 2, H * 0.872, HERO_MESSAGE, style('display', {
-        fontSize: '64px', fill: '#c44b3a', stroke: '#fff6e0', strokeThickness: 5
-      })).setOrigin(0.5).setDepth(71);
-      msg.alpha = 0; msg.setScale(0.9);
+    // CHAPTER 3 COMPLETE, cream on a dusk stroke over the violet sky.
+    const title = bigText(W / 2, 196, SUMMIT_TITLE, 72, '#ffe9a8', '#3a2a50', 8);
+    at(900, () => {
       audio.playStar?.();
-      this.tweens.add({
-        targets: msg, alpha: 1, scale: 1, duration: 1400, ease: 'Back.easeOut',
-        onComplete: () => this.tweens.add({
-          targets: msg, scaleX: 1.06, scaleY: 1.06,
-          duration: 800, yoyo: true, repeat: 1, ease: 'Sine.easeInOut'
-        })
-      });
+      title.setScale(0.92);
+      fadeTo(title, 1, 700, { scale: 1, ease: 'Back.easeOut' });
     });
 
-    // "Home" button: back to the (now-complete) Home Ground map.
-    this.time.delayedCall(10800, () => {
-      const btn = createButton(this, {
-        x: W / 2, y: H - 122, label: 'Home',
-        width: 340, height: 96, color: 0x4f8a3a,
-        onClick: () => this.exitFinale()
-      });
-      btn.setDepth(75); btn.alpha = 0;
-      this.tweens.add({ targets: btn, alpha: 1, duration: 800 });
+    // One cream strip holds both summit lines, the first set bigger and red.
+    // "You made it!" arrives alone, centred on the strip; the second line
+    // joins it as the first steps up.
+    const madeIt = bigText(W / 2, 352, SUMMIT_LINES[0], 64, '#c44b3a', '#fff6e0', 0);
+    const veryTop = bigText(W / 2, 394, SUMMIT_LINES[1], 52, INK, '#fff6e0', 0);
+    const stripW = Math.min(W - 48, Math.ceil(Math.max(madeIt.width, veryTop.width)) + 140);
+    const strip = this.add.graphics().setDepth(UI).setAlpha(0);
+    paper(strip, 8, 10, (gg, s) => {
+      ink(gg, s, 0xfff6e0);
+      gg.fillRoundedRect(W / 2 - stripW / 2, 268, stripW, 168, 20);
     });
-  }
-
-  // ============================================================
-  // Pet + ship gently choreograph around the hero card. Looped paths,
-  // slow and soft so they read as background motion behind the names.
-  // Returns the ship container (the card fades it out on the way off) and
-  // the pet riding in the cockpit (the drifting worlds make it wave).
-  // ============================================================
-  startChronoChoreography() {
-    const shipContainer = this.add.container(-200, H * 0.85).setDepth(65);
-    const shipG = drawShip(this, 0, 0, {
-      scale: 1.0,
-      parts: ship.getCurrentParts()
+    strip.fillStyle(0xe8dcc0, 1);
+    strip.fillRoundedRect(W / 2 - stripW / 2 + 20, 426, stripW - 40, 4, 2);
+    at(2600, () => {
+      audio.playStardustChime?.();
+      fadeTo([strip, madeIt], 1, 500);
     });
-    shipContainer.add(shipG);
-    shipContainer.shipG = shipG;
+    at(4400, () => {
+      audio.playStardustChime?.();
+      this.tweens.add({ targets: madeIt, y: 318, duration: 500, ease: 'Sine.easeInOut' });
+      veryTop.y = 406;
+      fadeTo(veryTop, 1, 500, { y: 394 });
+    });
+    at(8200, () => [title, strip, madeIt, veryTop].forEach(o => fadeOut(o, 400)));
 
-    let petInCockpit = null;
-    if (companion.hasStarter()) {
-      const pc = shipG.portholeCenter || { x: 0, y: -60 };
-      petInCockpit = drawCompanion(this, pc.x, pc.y, { scale: 0.4 });
-      shipG.add(petInCockpit);
+    // The pet hops into the window seat and the door shuts behind it.
+    at(8400, () => {
+      audio.playPetChirp?.();
+      rd.board({ duration: 900 });
+    });
+    at(9350, () => rd.closeDoor(260));
+
+    // The recap cards and the couplet: cream paper strips, built now so none
+    // of them costs a frame mid-ride, each faded in and out on its own beat.
+    HOMECOMING_CARDS.forEach(({ lines, y, show, hide }) => {
+      const cap = makeCaption(this, lines.join('\n'), { y, px: 52 }).setDepth(UI).setAlpha(0);
+      at(show, () => { cap.y = y + 14; fadeTo(cap, 1, 300, { y }); });
+      at(hide, () => fadeOut(cap, 300));
+    });
+
+    // Card three names the places, and each one lights as it is named.
+    ['store', 'garden', 'beach', 'bread'].forEach((id, i) => at(18500 + i * 800, () => {
+      audio.playStar?.();
+      rd.lightPlace(id, 450);
+    }));
+
+    // Card four: the lamps light one by one from the top down. Tower 1's lamp
+    // is already behind us by now; the rest are in view under the card.
+    for (let i = 0; i < rd.lampCount; i++) {
+      at(i === 0 ? 22500 : i === 1 ? 22900 : 23200 + (i - 2) * 280, () => rd.lightLamp(i, 320));
     }
 
-    // Soft figure-8-ish loop staying out of the central hero text area. The
-    // pet waves on one leg; there is no laser zap, Home Ground has no combat.
-    const stages = [
-      { x: 220,       y: H * 0.85, rot: 0,     dur: 4200, ease: 'Sine.easeInOut' },
-      { x: W - 220,   y: H * 0.75, rot: 0.18,  dur: 5200, ease: 'Sine.easeInOut' },
-      { x: W - 140,   y: H * 0.92, rot: -0.10, dur: 4400, ease: 'Sine.easeInOut' },
-      { x: 180,       y: H * 0.78, rot: 0.20,  dur: 5400, ease: 'Sine.easeInOut', wave: true },
-      { x: W * 0.5,   y: H * 0.95, rot: 0,     dur: 4400, ease: 'Sine.easeInOut' }
-    ];
+    // The couplet: the city's windows come on one group at a time, and the
+    // shore, the bridge and their reflections fade up under them.
+    for (let i = 0; i < rd.cityGroupCount; i++) at(26900 + i * 550, () => rd.lightCityGroup(i, 380));
+    at(28000, () => rd.fadeShoreLights(1, 5000));
 
-    const loop = (i) => {
-      if (!shipContainer.active) return;
-      const stage = stages[i % stages.length];
-      this.tweens.add({
-        targets: shipContainer,
-        x: stage.x,
-        y: stage.y,
-        rotation: stage.rot,
-        duration: stage.dur,
-        ease: stage.ease,
-        onComplete: () => {
-          if (stage.wave && petInCockpit) {
-            this.tweens.add({
-              targets: petInCockpit,
-              scaleX: 0.55, scaleY: 0.55,
-              duration: 220, yoyo: true, repeat: 2,
-              ease: 'Sine.easeInOut'
-            });
-            audio.playPetChirp?.();
-          }
-          loop(i + 1);
-        }
-      });
+    // The ride itself follows the scene clock (the same clock the cues above
+    // run on), so the framing and the words can never drift apart. A gentle
+    // pendulum sway the whole way, with a small lurch at each tower.
+    const pace = paceCurve(RIDE_PACE);
+    const rideEnd = RIDE_PACE[RIDE_PACE.length - 1][0];
+    const towerX = TOWER_T.map(t => cabinAt(t).x);
+    let clock = 0;
+    let passed = 0;
+    let docked = false;
+    const lurch = () => {
+      rd.sway(3, 760);
+      this.time.delayedCall(200, () => { if (!docked) rd.sway(1.6, 2800); });
     };
-    loop(0);
-
-    return { shipContainer, cockpitPet: petInCockpit };
-  }
-
-  // The journey drifts past behind the names, in six stops: where each chapter
-  // began and where it ended. Nodes spawn 6.5 s apart, so about five have
-  // appeared by the time the Onward button lands at 33 s; walking every world
-  // in play order at that cadence never gets past Chapter 1, while the bookends
-  // walk all three chapters inside the window. Returns the spawner and the
-  // live nodes so the card can stop and fade them.
-  startWorldsParallax(cockpitPet) {
-    const nodes = [];
-    let idx = 0;
-    const journey = [1, 2, 3].flatMap(ch => {
-      const worlds = getChapterWorlds(ch);
-      return [worlds[0].id, worlds[worlds.length - 1].id];
-    });
-
-    const spawnOne = () => {
-      const worldId = journey[idx++ % journey.length];
-      const y = Phaser.Math.Between(H * 0.06, H * 0.18);
-      const node = drawWorldNode(this, W + 120, y, worldId, { scale: 0.5 });
-      node.setDepth(62);
-      node.alpha = 0.5;
-      nodes.push(node);
-
-      const driftDur = 14000;
-      this.tweens.add({
-        targets: node,
-        x: -160,
-        duration: driftDur,
-        ease: 'Linear',
-        onComplete: () => {
-          const i = nodes.indexOf(node);
-          if (i >= 0) nodes.splice(i, 1);
-          node.destroy();
-        }
-      });
-      this.tweens.add({
-        targets: node,
-        y: y + 12,
-        duration: 2400,
-        yoyo: true,
-        repeat: -1,
-        ease: 'Sine.easeInOut'
-      });
-      this.time.delayedCall(driftDur / 2, () => {
-        if (!cockpitPet || !cockpitPet.active) return;
-        this.tweens.add({
-          targets: cockpitPet,
-          scaleX: 0.45,
-          scaleY: 0.35,
-          duration: 220,
-          yoyo: true,
-          repeat: 1,
-          ease: 'Sine.easeInOut'
-        });
-      });
+    const onUpdate = (time, delta) => {
+      clock += delta;
+      if (docked || clock < RIDE_PACE[0][0]) return;
+      rd.setRide(pace(clock));
+      if (passed < towerX.length && rd.cabin.x >= towerX[passed]) { passed++; lurch(); }
+      if (clock >= rideEnd) docked = true;
     };
+    at(9800, () => rd.sway(1.6, 2800));
 
-    this.time.delayedCall(2000, spawnOne);
-    const spawner = this.time.addEvent({
-      delay: 6500,
-      loop: true,
-      startAt: -2000,
-      callback: spawnOne
-    });
-    return { spawner, nodes };
-  }
-
-  // ============================================================
-  // PART C: Personalized hero shout-out (long, slow, the magic moment)
-  // Names reveal one at a time, then the message. Ship choreographs in
-  // the background. Gold sparkles drift. Holds long before "Onward".
-  // Plays at the end of the whole game (homecoming, World 38), between the
-  // recap cards and the dusk-on-the-mountain outro. Everything the card puts
-  // on stage stays local to this call: `leave` below closes over it, so there
-  // is no per-run scene state to reset when the dev menu replays the scene.
-  // ============================================================
-  showHeroCard() {
-    // Kick off the pet+ship choreography and the drifting worlds in the
-    // background (they orbit the bottom of the screen, behind the hero text).
-    const { shipContainer, cockpitPet } = this.startChronoChoreography();
-    const parallax = this.startWorldsParallax(cockpitPet);
-
-    // Every sparkle and ring registers here while it is in flight, so leave()
-    // can fade the whole stage together instead of letting gold specks rise
-    // over the dusk reveal for up to nine seconds after the tap.
-    const inFlight = new Set();
-    const track = (obj) => { inFlight.add(obj); return obj; };
-    const untrack = (obj) => { inFlight.delete(obj); obj.destroy(); };
-
-    // Slow dark wash, a quiet stage for the hero text: night falling over the
-    // dusk sky, deep violet. Paced to the 52 s credits song: the cards take
-    // ~13 s and the Onward button lands 33 s into this card, a few seconds
-    // before the song ends. The outro after it plays on the map theme, which
-    // leave() brings in as the song goes out.
-    const wash = this.add.rectangle(W / 2, H / 2, W, H, 0x1a1030, 1).setDepth(60);
-    wash.alpha = 0;
-    this.tweens.add({
-      targets: wash, alpha: 0.92,
-      duration: 3000, ease: 'Quad.easeIn'
+    // Docked: the sway settles, the door opens and the pet steps out onto
+    // the pier over the lit city.
+    at(rideEnd, () => { docked = true; rd.setRide(1); rd.settle(900); });
+    at(36000, () => rd.openDoor(260));
+    at(36400, () => {
+      audio.playPetChirp?.();
+      rd.alight({ duration: 1000 });
     });
 
-    // Soft gold halo backdrop behind where the names will appear.
-    const heroContainer = this.add.container(W / 2, H * 0.42).setDepth(70);
-    const halo = this.add.graphics();
-    halo.fillStyle(0xfbbf24, 0.10);
-    halo.fillCircle(0, 0, 600);
-    halo.fillStyle(0xfbbf24, 0.06);
-    halo.fillCircle(0, 0, 780);
-    halo.alpha = 0;
-    heroContainer.add(halo);
-    this.tweens.add({
-      targets: halo, alpha: 1,
-      duration: 2800, delay: 1500,
-      ease: 'Quad.easeOut'
-    });
-
-    // Subtle bob across the whole hero container.
-    this.tweens.add({
-      targets: heroContainer,
-      y: H * 0.42 - 8,
-      duration: 4200, yoyo: true, repeat: -1,
-      ease: 'Sine.easeInOut'
-    });
-
-    // Names reveal one at a time. Each gets its own sparkle burst.
-    // Split HERO_NAMES by spaces so each kid lands on its own beat.
-    const nameStrings = HERO_NAMES.split(/\s+/).filter(Boolean);
-    const nameSpacing = 320;
-    const nameStartX = -(nameStrings.length - 1) * nameSpacing / 2;
-    const nameObjects = [];
-    nameStrings.forEach((str, idx) => {
-      const x = nameStartX + idx * nameSpacing;
-      const t = this.add.text(x, -100, str, style('display', {
-        fontSize: '120px',
-        fill: '#fbbf24',
-        stroke: '#0a0a1a',
-        strokeThickness: 6,
-        align: 'center'
-      })).setOrigin(0.5);
-      t.alpha = 0;
-      t.setScale(0.7);
-      heroContainer.add(t);
-      nameObjects.push(t);
-    });
-
-    const NAME_REVEAL_DELAYS = [4500, 8500, 12500]; // t in ms from now
-    nameStrings.forEach((str, idx) => {
-      this.time.delayedCall(NAME_REVEAL_DELAYS[idx], () => {
-        const target = nameObjects[idx];
-        // Sparkle burst at the name's spot
-        const cx = W / 2 + (nameStartX + idx * nameSpacing);
-        const cy = H * 0.42 - 100;
-        for (let s = 0; s < 14; s++) {
-          const star = track(this.add.graphics().setDepth(69));
-          star.fillStyle(0xfff3b8, 1);
-          star.fillCircle(0, 0, 3 + Math.random() * 3);
-          star.x = cx; star.y = cy;
-          const angle = (s / 14) * Math.PI * 2;
-          const dist = 60 + Math.random() * 100;
-          this.tweens.add({
-            targets: star,
-            x: cx + Math.cos(angle) * dist,
-            y: cy + Math.sin(angle) * dist,
-            alpha: 0,
-            duration: 900 + Math.random() * 400,
-            ease: 'Quad.easeOut',
-            onComplete: () => untrack(star)
-          });
-        }
-        audio.playMatch?.();
-        this.tweens.add({
-          targets: target,
-          alpha: 1, scale: 1,
-          duration: 900, ease: 'Back.easeOut'
-        });
+    // The three names, one at a time, then the message, once, as the last beat.
+    const names = HERO_NAMES.split(/\s+/).filter(Boolean);
+    names.forEach((name, i) => {
+      const t = bigText(W / 2 + (i - (names.length - 1) / 2) * 300, 250, name, 120, '#ffd27a', '#3a2a50', 10);
+      at(37800 + i * 2200, () => {
+        audio.playStardustChime?.();
+        t.setScale(0.7);
+        fadeTo(t, 1, 900, { scale: 1, ease: 'Back.easeOut' });
       });
     });
-
-    // Message ("爸爸爱你") appears after all names land.
-    const msg = this.add.text(0, 100, HERO_MESSAGE, style('display', {
-      fontSize: '92px',
-      fill: '#ffffff',
-      stroke: '#0a0a1a',
-      strokeThickness: 5,
-      align: 'center'
-    })).setOrigin(0.5);
-    msg.alpha = 0;
-    msg.setScale(0.85);
-    heroContainer.add(msg);
-    this.time.delayedCall(17000, () => {
-      this.tweens.add({
-        targets: msg,
-        alpha: 1, scale: 1,
-        duration: 2200, ease: 'Back.easeOut',
-        onComplete: () => {
-          // Heartbeat pulse: slow, twice.
-          this.tweens.add({
-            targets: msg,
-            scaleX: 1.08, scaleY: 1.08,
-            duration: 700, yoyo: true, repeat: 1,
-            ease: 'Sine.easeInOut'
-          });
-        }
-      });
+    const love = bigText(W / 2, 420, HERO_MESSAGE, 128, '#fff6e0', '#c44b3a', 10);
+    at(44800, () => {
+      audio.playStar?.();
+      love.setScale(0.85);
+      fadeTo(love, 1, 1400, {
+        scale: 1, ease: 'Back.easeOut',
+        // Two slow heartbeats.
+        onComplete: () => this.tweens.add({
+          targets: love, scaleX: 1.08, scaleY: 1.08,
+          duration: 700, yoyo: true, repeat: 1, ease: 'Sine.easeInOut'
+        })
+      })
     });
 
-    // Slow expanding gold rings around the message, repeating for as long as
-    // the card holds: the visual hum of the moment.
-    let ringSpawner = null;
-    this.time.delayedCall(20500, () => {
-      ringSpawner = this.time.addEvent({
-        delay: 2400, loop: true,
-        callback: () => {
-          const ring = track(this.add.graphics().setDepth(68));
-          ring.lineStyle(4, 0xfbbf24, 0.5);
-          ring.strokeCircle(0, 0, 80);
-          ring.x = W / 2;
-          ring.y = H * 0.42 + 100;
-          this.tweens.add({
-            targets: ring,
-            scaleX: 5, scaleY: 5, alpha: 0,
-            duration: 3200, ease: 'Quad.easeOut',
-            onComplete: () => untrack(ring)
-          });
-        }
-      });
-    });
-
-    // Continuous gentle gold star drift, atmosphere over the whole hold time.
-    const driftStars = this.time.addEvent({
-      delay: 400, loop: true,
-      callback: () => {
-        const s = track(this.add.graphics().setDepth(69));
-        s.fillStyle(0xfbbf24, 0.85);
-        s.fillCircle(0, 0, 1.5 + Math.random() * 2.5);
-        s.x = Math.random() * W;
-        s.y = H + 20;
-        this.tweens.add({
-          targets: s,
-          y: -30,
-          alpha: { from: 0, to: 0.9 },
-          duration: 6000 + Math.random() * 3000,
-          ease: 'Linear',
-          onComplete: () => untrack(s)
-        });
-      }
-    });
-
-    // Clear the stage so the next beat plays on the sky beneath it: stop the
-    // spawners, fade the wash, names, ship, button, drifting worlds and every
-    // sparkle still in flight out together, then hand off.
-    let button = null;
+    // Home, back to the finished map. Then the lit city idles for as long as
+    // the kid likes; nothing moves on until Home is tapped.
     let leaving = false;
-    const leave = (next) => {
-      if (leaving) return;   // createButton fires onClick on every pointerdown
-      leaving = true;
-      ringSpawner?.remove();
-      driftStars.remove();
-      parallax.spawner.remove();
-      this.handOffToMapTheme();
-
-      const bits = [wash, heroContainer, shipContainer, button, ...parallax.nodes, ...inFlight]
-        .filter(o => o && o.active);
-      parallax.nodes.length = 0;
-      inFlight.clear();
-      bits.forEach(o => this.tweens.killTweensOf(o));
-      this.tweens.add({
-        targets: bits, alpha: 0, duration: 700, ease: 'Quad.easeIn',
-        onComplete: () => {
-          bits.forEach(o => o.destroy());
-          next();
+    let handedOff = false;
+    at(49500, () => {
+      const btn = createButton(this, {
+        x: W / 2, y: 1798, label: 'Home',
+        width: 340, height: 96, color: 0x4f8a3a,
+        onClick: () => {
+          if (leaving) return;   // createButton fires onClick on every pointerdown
+          leaving = true;
+          handedOff = true;      // exitFinale takes the song from here
+          this.exitFinale();
         }
       });
-    };
-
-    // "Onward" arrives at 33 s. The hero card is not the last beat: the
-    // dusk-on-the-mountain outro follows it (see showHomecomingOutro), which
-    // closes the game.
-    this.time.delayedCall(33000, () => {
-      button = createButton(this, {
-        x: W / 2, y: H - 200, label: 'Onward',
-        width: 360, height: 100,
-        color: 0xfbbf24,
-        onClick: () => leave(() => this.showHomecomingOutro())
-      });
-      button.setDepth(75);
-      button.alpha = 0;
-      this.tweens.add({ targets: button, alpha: 1, duration: 800 });
+      btn.setDepth(UI + 5).setAlpha(0);
+      fadeTo(btn, 1, 800);
+      rd.startIdle();
     });
+
+    // When the credits song ends, the Home Ground map theme carries the idle
+    // (WorldMapScene asks for the same track, so it plays straight through).
+    // With the music off or the song missing it hands off straight away, and a
+    // late timer covers a song whose end never gets reported.
+    const song = this._creditsSong;
+    const toMapTheme = () => {
+      if (handedOff) return;
+      handedOff = true;
+      this.handOffToMapTheme();
+    };
+    if (song) {
+      song.once('complete', toMapTheme);
+      at(((song.duration || 52.8) + 2) * 1000, toMapTheme);
+    } else {
+      toMapTheme();
+    }
+
+    // Tear down with the scene: the ride (and its baked textures) and every
+    // listener, so the next replay starts clean.
+    const cleanup = () => {
+      this.events.off('update', onUpdate);
+      this.events.off('shutdown', cleanup);
+      this.events.off('destroy', cleanup);
+      if (song) song.off('complete', toMapTheme);
+      rd.destroy();
+    };
+    this.events.on('update', onUpdate);
+    this.events.once('shutdown', cleanup);
+    this.events.once('destroy', cleanup);
   }
 
-  // The credits song plays once and runs out within seconds of the Onward
-  // tap, which used to leave the homecoming outro (the lit mountain, the
-  // message, the Home button) in silence. Fade it out and bring the Home
-  // Ground map theme up under the outro instead; WorldMapScene asks for the
-  // same track on the way out, so the music carries straight through.
+  // The credits song plays once and runs out a few seconds after the Ride
+  // Down's Home button arrives, which would leave the idle over the lit city
+  // in silence. Fade it out and bring the Home Ground map theme up instead;
+  // WorldMapScene asks for the same track on the way out, so the music
+  // carries straight through.
   handOffToMapTheme() {
     const song = this._creditsSong;
     this._creditsSong = null;
     if (song && song.isPlaying) {
-      this.tweens.add({ targets: song, volume: 0, duration: 1200, onComplete: () => song.stop() });
+      this.tweens.add({ targets: song, volume: 0, duration: 1200, onComplete: () => releaseSong(song) });
     }
     music.fadeToTrack(this, music.resolveTrack(this, 'homeGroundHome'), 1500);
   }
@@ -994,12 +810,13 @@ export class CreditsScene extends Phaser.Scene {
     }
     progress.consumeJustClearedWorld(); // Clear any stale flag.
 
-    if (this._creditsSong && this._creditsSong.isPlaying) {
+    const song = this._creditsSong;
+    if (song && song.isPlaying) {
       this.tweens.add({
-        targets: this._creditsSong,
+        targets: song,
         volume: 0,
         duration: 400,
-        onComplete: () => this._creditsSong.stop()
+        onComplete: () => releaseSong(song)
       });
     }
 

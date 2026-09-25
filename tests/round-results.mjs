@@ -303,3 +303,72 @@ test('Conveyor uses the same failed-boss result and retains a completed quota wi
     assert.equal(progress.isLevelMastered(31, 4), bossWon);
   }
 });
+
+test('the World 38 finale plays the All Packed win, then starts the credits exactly once', () => {
+  masterPracticeLevels(38);
+  const scene = attachSceneSystems(new ConveyorScene());
+  const registry = new Map();
+  let winDone = null;
+  let wins = 0;
+  const fades = [];
+  Object.assign(scene, {
+    worldId: 38, currentLevel: 4, isBoss: true, bossWon: true,
+    score: 44, attempts: 44, scoreThreshold: 44,
+    duration: 130, roundEndsAt: 130000,
+    bestStreak: 44, stardustEarned: 0,
+    registry,
+    dropCrateTimer: noop, setDocksEnabled: noop,
+    playOrderCompleteCinematic: done => { wins++; winDone = done; }
+  });
+  // A fake camera: the fade finishes when the test says so.
+  let fadeDone = null;
+  scene.cameras.main = {
+    shake: noop,
+    once: (event, callback) => { assert.equal(event, 'camerafadeoutcomplete'); fadeDone = callback; },
+    fadeOut: (...args) => fades.push(args)
+  };
+  scene.time.now = 60000;
+  scene.finishRound({ bossWin: true });
+
+  // Saved before anything plays, so a closed tab mid-credits keeps it.
+  assert.equal(progress.finale3Seen, true);
+  assert.equal(registry.get('creditsMode'), 'homecoming');
+  assert.equal(registry.get('currentWorldId'), 38);
+  // The win beat plays first; nothing has moved on yet and no summary shows.
+  assert.equal(wins, 1);
+  assert.deepEqual(scene.destinations, []);
+  assert.deepEqual(scene.summaries, []);
+
+  // The beat ends (its timer or a tap), and a stray second call changes nothing.
+  winDone();
+  winDone();
+  assert.equal(fades.length, 1);
+  assert.deepEqual(scene.destinations, []);
+  fadeDone();
+  assert.deepEqual(scene.destinations, ['CreditsScene']);
+
+  // A late round-clock or quota callback cannot run the round end again.
+  scene.finishRound({ bossWin: true });
+  assert.equal(wins, 1);
+  assert.deepEqual(scene.destinations, ['CreditsScene']);
+});
+
+test('a World 38 replay after the finale keeps the normal boss win flow', () => {
+  masterPracticeLevels(38);
+  progress.markFinale3Seen();
+  const scene = attachSceneSystems(new ConveyorScene());
+  Object.assign(scene, {
+    worldId: 38, currentLevel: 4, isBoss: true, bossWon: true,
+    score: 44, attempts: 44, scoreThreshold: 44,
+    duration: 130, roundEndsAt: 130000,
+    bestStreak: 44, stardustEarned: 0,
+    registry: new Map(),
+    dropCrateTimer: noop, setDocksEnabled: noop,
+    playOrderCompleteCinematic: done => done()
+  });
+  scene.time.now = 60000;
+  scene.finishRound({ bossWin: true });
+  assert.deepEqual(scene.destinations, []);
+  assert.equal(scene.summaries.length, 1);
+  assert.equal(scene.summaries[0].bossWin, true);
+});

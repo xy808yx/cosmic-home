@@ -343,6 +343,7 @@ test('credits load their own song and preserve nonlooping direct playback and mu
   let plays = 0;
   const context = {
     registry: { get: () => 'cliffhanger' },
+    events: { once() {}, off() {} },
     cache: { audio: { exists: key => key === 'creditsSong' } },
     sound: { add(key, config) {
       assert.equal(key, 'creditsSong');

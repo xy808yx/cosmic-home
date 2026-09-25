@@ -2018,12 +2018,21 @@ export class ConveyorScene extends Phaser.Scene {
     // GameScene routes the W11/W28 finales. markFinale3Seen persists the flag
     // EARLY (atomic) so a tab close
     // mid-credits can't strand it; replays fall through to the normal boss flow.
+    // The kid still gets the "All Packed!" win and its line first; the credits
+    // start once it ends (or is tapped away), exactly once, behind a short fade.
     if (isWin && isChapter3FinaleWorld(this.worldId)
         && progress.isWorldFullyCleared(this.worldId) && !progress.finale3Seen) {
       progress.markFinale3Seen();
       this.registry.set('currentWorldId', this.worldId);
       this.registry.set('creditsMode', 'homecoming');
-      this.scene.start('CreditsScene');
+      let rolling = false;
+      this.playOrderCompleteCinematic(() => {
+        if (rolling) return;
+        rolling = true;
+        const cam = this.cameras.main;
+        cam.once('camerafadeoutcomplete', () => this.scene.start('CreditsScene'));
+        cam.fadeOut(400, 10, 10, 26);
+      });
       return;
     }
 
