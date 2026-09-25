@@ -31,7 +31,6 @@ import { audio } from './AudioManager.js';
 import { drawShip } from './ShipRenderer.js';
 import { ship } from './ShipManager.js';
 import { companion, drawCompanion } from './CompanionManager.js';
-import { style } from './textStyles.js';
 import { lerpHex } from './colorUtils.js';
 
 const W = 1080;
@@ -167,19 +166,11 @@ export function playWormholeCinematic(scene, direction, onDone, opts = {}) {
   let shockTween = null;
   const timers = [];
 
-  // --- TAP-TO-SKIP (invisible full-screen surface + a gentle late-fading hint) ---
+  // --- TAP SHIELD (invisible full-screen surface, no handler) ---
+  // The dive always plays in full; this only swallows taps so nothing on the
+  // map underneath can start a level mid-warp.
   const hit = scene.add.rectangle(CX, 960, W, H, 0x000000, 0.001).setInteractive();
   root.add(hit);
-  // Body size, light ink and a dark outline so it reads over the bright
-  // passing rings and the pale homecoming sky.
-  const skipHint = scene.add.text(CX, H - 150, 'tap to skip', style('body', {
-    fontSize: '42px', fill: '#e0e0ef', fontStyle: '700',
-    stroke: '#0a0a1a', strokeThickness: 5
-  })).setOrigin(0.5).setAlpha(0);
-  root.add(skipHint);
-  timers.push(scene.time.delayedCall(1000, () => {
-    scene.tweens.add({ targets: skipHint, alpha: 0.85, duration: 500, ease: 'Sine.easeOut' });
-  }));
 
   function redraw() {
     const p = clock.p;
@@ -318,7 +309,6 @@ export function playWormholeCinematic(scene, direction, onDone, opts = {}) {
   function punchOut() {
     if (punched) return;
     punched = true;
-    skipHint.setAlpha(0);
     fireShockwave();
     // Bright bloom + a harder kick.
     scene.tweens.add({ targets: flash, alpha: 1, duration: 220, ease: 'Cubic.easeIn' });
@@ -350,18 +340,6 @@ export function playWormholeCinematic(scene, direction, onDone, opts = {}) {
     try { onDone?.(); } catch (e) { /* scene swap in flight */ }
   }
 
-  function skip() {
-    if (punched || done) return;
-    scene.tweens.killTweensOf(clock);
-    clock.p = 1;
-    // Jump straight to the climax: suppress the mid-cross wink so it can't fire
-    // its camera-flash + tone in the same frame as punchOut's bloom (double kick).
-    winkFired = true;
-    redraw();
-    punchOut();
-  }
-  hit.on('pointerdown', skip);
-
   // Master clock — the single frame loop.
   const clock = { p: 0 };
   scene.tweens.add({
@@ -373,6 +351,4 @@ export function playWormholeCinematic(scene, direction, onDone, opts = {}) {
   // Warp whoosh (the rising sawtooth maps onto the accelerating dive).
   audio.playWarp?.();
   redraw();
-
-  return { skip };
 }

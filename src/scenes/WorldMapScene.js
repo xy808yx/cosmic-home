@@ -1254,8 +1254,7 @@ export class WorldMapScene extends Phaser.Scene {
     this._warping = true;
     // NOTE: do NOT disable this.input here. The cinematic's own opaque backdrop
     // + full-screen hit rect (depth 2000) already shield the map nodes from
-    // stray taps, and disabling the scene's InputPlugin would also kill the
-    // cinematic's tap-to-skip (the skip rect lives on this same scene).
+    // stray taps. The dive has no skip: it always plays in full.
     if (this.shipPet) {
       this.tweens.killTweensOf(this.shipPet);
       this.tweens.add({
@@ -1611,9 +1610,9 @@ export class WorldMapScene extends Phaser.Scene {
     this.shipPet.x = hostPos.x;
     this.shipPet.y = hostPos.y - 30;
     this.shipPet.rotation = 0;
-    // NB: scene input stays ENABLED — the full-screen skipHit overlay below
-    // (created at depth 900) both captures the tap-to-skip and shields the map
-    // nodes. Disabling input here previously killed the skip entirely.
+    // NB: scene input stays ENABLED. The full-screen shield below (depth 900)
+    // swallows taps so no map node can start a level mid-warp. The flight has
+    // no skip: it always plays in full.
 
     // Gauntlet path (Glitch, King Coli): GameScene swaps to the boss theme on
     // arrival. Pause the map ambient here so the brief travel beat isn't backed
@@ -1622,46 +1621,24 @@ export class WorldMapScene extends Phaser.Scene {
       music.pause();
     }
 
-    let skipped = false;
     let arrived = false;
-    let travelTween = null;
-    const skipHit = this.add.rectangle(W / 2, H / 2, W, H, 0, 0)
+    // Invisible tap shield with no handler. It stays up through the flight and
+    // the arrival dwell so a stray tap can't hit a map node and race the scene
+    // swap below; scene.start in _enterHiddenDestination tears it down.
+    this.add.rectangle(W / 2, H / 2, W, H, 0, 0)
       .setInteractive().setDepth(900);
 
-    // Guard against the natural-completion path and the tap-skip path both
-    // firing in the same frame — without the `arrived` flag the tooltip and
-    // dwell timer would fire twice.
     const finishArrival = () => {
       if (arrived) return;
       arrived = true;
-      // Keep skipHit alive (it's invisible) as an input shield through the
-      // arrival dwell so a stray tap can't hit a map node and race the scene
-      // swap below; the `arrived` guard makes further taps no-ops, and
-      // scene.start in _enterHiddenDestination tears the overlay down.
       this._showArrivalTooltip(this._arrivalTooltipConfig(hiddenId, hiddenPos));
-      const dwell = skipped ? 900 : 1600;
-      this.time.delayedCall(dwell, () => this._enterHiddenDestination(hiddenId));
+      this.time.delayedCall(1600, () => this._enterHiddenDestination(hiddenId));
     };
-
-    skipHit.on('pointerdown', () => {
-      if (skipped || arrived) return;
-      skipped = true;
-      if (travelTween) travelTween.stop();
-      this.tweens.killTweensOf(this.shipPet);
-      this.shipPet.x = hiddenPos.x;
-      this.shipPet.y = hiddenPos.y - 30;
-      this.shipPet.rotation = 0;
-      finishArrival();
-    });
 
     // Brief settle so the warp cinematic's fade has fully cleared before
     // the ship animates off.
     this.time.delayedCall(450, () => {
-      if (skipped) return;
-      travelTween = this._travelAlongBranch(hostPos, hiddenPos, () => {
-        if (skipped) return;
-        finishArrival();
-      });
+      this._travelAlongBranch(hostPos, hiddenPos, finishArrival);
     });
 
     return true;

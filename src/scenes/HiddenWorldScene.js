@@ -140,7 +140,7 @@ export class HiddenWorldScene extends Phaser.Scene {
       this.createHotPotExploration();
       music.fadeToTrack(this, music.resolveTrack(this, 'hotPotTheme', 'dadsGarage'));
     } else if (this.world.id === 18) {
-      // Quilchena playground / Point Grey track — the "RECESS" hidden world.
+      // The neighbourhood playground and running track: the "RECESS" hidden world.
       this.createPlaygroundExploration();
       music.fadeToTrack(this, music.resolveTrack(this, 'playgroundTheme', 'homeTheme'));
     } else {
@@ -224,6 +224,16 @@ export class HiddenWorldScene extends Phaser.Scene {
         this.garagePetInteract(item.id);
       });
     }
+
+    // The heat lamp is painted into the backdrop, so it gets its own tap zone
+    // (the dome and bulb, clear of the whiteboard's left edge at x 260). The pet
+    // only plays when tapped, so without this it would never bask under it.
+    const lampHit = this.add.rectangle(180, 305, 140, 190, 0, 0)
+      .setInteractive({ useHandCursor: true }).setDepth(9);
+    lampHit.on('pointerdown', () => {
+      audio.playClick?.();
+      this.garagePetInteract('lamp');
+    });
 
     // After the objects: the pet's routines use the node table above.
     this.createGaragePet();
@@ -580,14 +590,14 @@ export class HiddenWorldScene extends Phaser.Scene {
   }
 
   // ----------------------------------------------------------
-  // GARAGE PET: roams the garage and uses each object in turn.
+  // GARAGE PET: plays with an object only when a kid taps it.
   // ----------------------------------------------------------
-  // It walks to an object, does that object's routine (sits in the ebike seat,
-  // climbs into the stroller, watches a print...), rests a moment, then takes
-  // the next stop off a shuffled deck. Tapping an object queues that object
-  // next: a tap cuts a rest short but never a routine in progress, so no lid is
-  // left open and no bike is left mid-roll. Every routine takes a `done`
-  // callback and hands the pet back on the floor, out of any object.
+  // A tap walks the pet to that object for its routine (sits in the ebike seat,
+  // climbs into the stroller, watches a print...), then it stands and looks
+  // around until the next tap. It never picks a stop on its own. A tap during a
+  // routine is queued (the latest tap wins) and runs as soon as the routine
+  // ends, so no lid is left open and no bike is left mid-roll. Every routine
+  // takes a `done` callback and hands the pet back on the floor, out of any object.
   //
   // Routines that put the pet IN something move it inside that object's node
   // (_gpEnter), under the object's front piece (_gpBehind): it then breathes
@@ -604,8 +614,6 @@ export class HiddenWorldScene extends Phaser.Scene {
     this._gpHeld = null;
     this._gpHost = null;
     this._gpHostNode = null;
-    this._gpDeck = [];
-    this._gpLast = null;
     this._gpFacing = -1;
     if (!companion.hasStarter()) return;
 
@@ -625,7 +633,7 @@ export class HiddenWorldScene extends Phaser.Scene {
       this._gpEmote('♥');
     });
 
-    this._gpRest(1200);
+    this._gpRest();
   }
 
   // Redraw the in-scene garage pet so a cosmetic equipped mid-visit (e.g. Dad's
@@ -650,22 +658,14 @@ export class HiddenWorldScene extends Phaser.Scene {
 
   _gpNext() {
     const pet = this._garagePetContainer;
-    if (!pet?.active || this._gpBusy) return;
+    const id = this._gpQueued;
+    if (!pet?.active || this._gpBusy || !id) return;
     this._gpRestTimer?.remove(false);
     this._gpRestTimer = null;
     this._gpIdleTween?.stop();
     this._gpIdleTween = null;
     pet.angle = 0;
-    const queued = this._gpQueued;
-    const id = queued || this._gpDraw();
     this._gpQueued = null;
-    // A tapped stop comes off this round's deck, so it can't come straight
-    // back as the next random pick.
-    if (queued) {
-      const i = this._gpDeck.indexOf(queued);
-      if (i >= 0) this._gpDeck.splice(i, 1);
-    }
-    this._gpLast = id;
     this._gpBusy = true;
     const routine = {
       freezer:  this.gpFreezerDive,
@@ -683,21 +683,9 @@ export class HiddenWorldScene extends Phaser.Scene {
     routine.call(this, () => this._gpRest());
   }
 
-  // Every stop once per shuffled round, never the same one twice in a row.
-  _gpDraw() {
-    if (!this._gpDeck.length) {
-      const ids = ['freezer', 'rack', 'bins', 'squat', 'laptop', 'printer',
-        'stroller', 'bikes', 'ebike', 'shoes', 'lamp'];
-      Phaser.Utils.Array.Shuffle(ids);
-      if (ids[0] === this._gpLast) ids.push(ids.shift());
-      this._gpDeck = ids;
-    }
-    return this._gpDeck.shift();
-  }
-
-  // Between routines: stand and look around, then go. A queued tap keeps the
-  // pause short.
-  _gpRest(ms) {
+  // Between taps: stand and look around until a kid taps something. A tap that
+  // came in during the last routine runs after a short beat.
+  _gpRest() {
     const pet = this._garagePetContainer;
     if (!pet?.active) return;
     if (this._gpHost) this._gpExit();
@@ -705,20 +693,20 @@ export class HiddenWorldScene extends Phaser.Scene {
     pet.setScale(1);
     pet.angle = 0;
     this._gpBusy = false;
-    if (ms == null) ms = this._gpQueued ? 250 : 2200 + Math.random() * 2400;
+    if (this._gpQueued) {
+      this._gpRestTimer = this.time.delayedCall(250, () => this._gpNext());
+      return;
+    }
     const face0 = this._gpFacing;
     const look = { p: 0 };
     this._gpIdleTween = this.tweens.add({
-      targets: look, p: 1, duration: ms,
+      targets: look, p: 1, duration: 3600, repeat: -1, repeatDelay: 1800,
       onUpdate: () => {
-        if (ms > 900) {
-          const want = (look.p > 0.4 && look.p < 0.75) ? -face0 : face0;
-          if (want !== this._gpFacing) this._gpFace(want);
-        }
+        const want = (look.p > 0.4 && look.p < 0.75) ? -face0 : face0;
+        if (want !== this._gpFacing) this._gpFace(want);
         pet.angle = Math.sin(look.p * Math.PI * 2) * 3;
       }
     });
-    this._gpRestTimer = this.time.delayedCall(ms, () => this._gpNext());
   }
 
   // ----- Garage pet helpers -----
@@ -1957,7 +1945,7 @@ export class HiddenWorldScene extends Phaser.Scene {
   }
 
   // ============================================================
-  // RECESS — Quilchena playground hidden inside "Inner Space".
+  // RECESS: the neighbourhood playground hidden inside "Inner Space".
   // A nostalgic real-world running track / playground, rendered
   // straight & cute. Same delightful trick as Dad's Garage.
   // ============================================================
@@ -2037,7 +2025,7 @@ export class HiddenWorldScene extends Phaser.Scene {
     const trackTop = H - 178;
     // Second lane, so the full-size label clears "Dad's notes" standing on the
     // track's edge above it.
-    addRoomLabel(this, W / 2, trackTop + 66, 'RUNNING TRACK', '#f4f8ff', '#173a63').setDepth(9);
+    addRoomLabel(this, W / 2, trackTop + 66, 'Running track', '#f4f8ff', '#173a63').setDepth(9);
     const trackHit = this.add.rectangle(W / 2, (trackTop + H) / 2, W, H - trackTop, 0, 0)
       .setInteractive({ useHandCursor: true }).setDepth(9);
     trackHit.on('pointerdown', () => {
@@ -2087,7 +2075,7 @@ export class HiddenWorldScene extends Phaser.Scene {
     drawConifer(bg, 152, 454, 0.8);   // trunk base ≈ 476
     drawConifer(bg, 940, 451, 0.9);   // trunk base ≈ 476
     drawConifer(bg, 1016, 445, 1.1);  // trunk base ≈ 477
-    // Cream Collegiate-Gothic Point Grey building with a corner spire tower.
+    // Cream Collegiate-Gothic school building with a corner spire tower.
     drawSchoolTowerBack(bg, 560, 300);
 
     // --- GREEN TURF FIELD with a soccer goal (≈ 470–632) ---
@@ -2137,6 +2125,12 @@ export class HiddenWorldScene extends Phaser.Scene {
 
   // Companion pet on the woodchips; kept as `this._recessPet` for the swing.
   createRecessPet() {
+    // Reset first: these fields outlive the scene. A busy flag left over from
+    // leaving mid-routine made the pet ignore every tap on later visits.
+    this._petActive = false;
+    this._recessPet = null;
+    this._recessPetSprite = null;
+    this._recessPetBob = null;
     if (!companion.hasStarter()) return;
     this._recessPetHome = { x: 770, y: 1650 };
     const c = this.add.container(this._recessPetHome.x, this._recessPetHome.y).setDepth(11);
@@ -3541,7 +3535,7 @@ function drawConifer(bg, x, y, s = 1) {
   bg.fillTriangle(x, y - 34 * s, x + w * 0.3, y - 34 * s, x, y - 80 * s);
 }
 
-// Warm Art-Deco / Collegiate school (Point Grey Secondary feel): warm buff stone
+// Warm Art-Deco / Collegiate school (a classic city high school): warm buff stone
 // with a cornice + base course, tall PAIRED windows in bays (not a factory grid),
 // a projecting central entrance pavilion with a stepped Deco crown, a CLOCK, a
 // grand doorway, and a FLAGPOLE + FLAG on top — the unmistakable "school" signals.

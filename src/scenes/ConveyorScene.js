@@ -536,7 +536,7 @@ export class ConveyorScene extends Phaser.Scene {
         gr.lineTo(size * 0.35, size * 0.5);
         gr.strokePath();
       },
-      onClick: () => this.abandonRound('LevelSelectScene')
+      onClick: () => this.abandonRound(this.world?.hidden ? 'WorldMapScene' : 'LevelSelectScene')
     }).setDepth(20);
 
     // The stack runs mode title, world name, counter, stamp label, and has to end
@@ -2233,7 +2233,9 @@ export class ConveyorScene extends Phaser.Scene {
 
   exitToMap() {
     // A just-mastered world auto-advances on the map; otherwise back to the grid.
-    if (progress.justClearedWorld) {
+    // Secret challenges have no mission briefing of their own, so they always
+    // go back to the map.
+    if (progress.justClearedWorld || this.world?.hidden) {
       this.scene.start('WorldMapScene');
     } else {
       this.scene.start('LevelSelectScene');

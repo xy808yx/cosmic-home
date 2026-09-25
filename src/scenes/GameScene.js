@@ -3107,8 +3107,9 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     // If a world clear is pending auto-advance, jump straight to the map
-    // so the ship animates to the next world.
-    if (progress.justClearedWorld) {
+    // so the ship animates to the next world. Secret challenges have no
+    // mission briefing of their own, so they always go back to the map.
+    if (progress.justClearedWorld || this.world?.hidden) {
       this.scene.start('WorldMapScene');
     } else {
       this.scene.start('LevelSelectScene');
